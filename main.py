@@ -30,6 +30,7 @@ def select_hwnd():
 
 if __name__ == "__main__":
     macro.set_hwnd(1903176)
+    macro.move_window(0, 0)
 
     print("\n명령어: 1=Ctrl+I, q=종료")
     while True:
@@ -38,7 +39,5 @@ if __name__ == "__main__":
             break
         elif cmd == "1":
             macro.focus_window()
-            macro.key_down(win32con.VK_CONTROL)
-            macro.key_press(ord("I"))
-            macro.key_up(win32con.VK_CONTROL)
-            print("Ctrl+I 전송")
+            macro.mouse_click_left(1015, 970)
+            print("(1015, 970) 클릭")

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(where claude:*)",
+      "Bash(powershell -Command \"[System.Environment]::GetEnvironmentVariable\\('Path', 'Machine'\\)\")",
+      "Bash(grep -i \"eno\\\\\\\\.local\")",
+      "Skill(update-config)"
+    ]
+  }
+}

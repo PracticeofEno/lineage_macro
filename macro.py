@@ -207,7 +207,7 @@ def send_all_chars(interval: float = 1):
         img = screenshot()
 
         # 3. 크롭
-        cropped = imageProcesser.crop(img, 155, 583, 50, 15)
+        cropped = imageProcesser.crop(img, 248, 933, 200, 24)
 
         # 4. data/{문자}.png 저장
         save_path = os.path.join("data", f"{i}.png")

@@ -31,10 +31,10 @@ def select_hwnd():
 
 
 if __name__ == "__main__":
-    macro.set_hwnd(1903176)
+    macro.set_hwnd(4459766)
     macro.move_window(0, 0)
 
-    print("\n명령어: 1=클릭, 2=스크린샷, 4=2초 후 스크린샷, q=종료")
+    print("\n명령어: 1=클릭, 2=스크린샷, 3=모든 문자 전송, q=종료")
     while True:
         cmd = input("> ").strip()
         if cmd == "q":
@@ -44,10 +44,7 @@ if __name__ == "__main__":
             macro.mouse_click_left(1015, 970)
             print("(1015, 970) 클릭")
         elif cmd == "2":
-            macro.screenshot()
-        elif cmd == "4":
-            print("2초 후 스크린샷...")
-            def delayed_screenshot():
-                time.sleep(2)
-                macro.screenshot()
-            threading.Thread(target=delayed_screenshot, daemon=True).start()
+            img = macro.screenshot()
+            img.save("image/screenshot.png")
+        elif cmd == "3":
+            macro.send_all_chars()

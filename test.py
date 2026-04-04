@@ -1,14 +1,14 @@
-def all_chars():
-    """a-z, A-Z, 한글 음절(가~힣) 순서로 모든 문자를 yield한다."""
-    for c in range(ord('a'), ord('z') + 1):
-        yield chr(c)
-    for c in range(ord('A'), ord('Z') + 1):
-        yield chr(c)
-    for c in range(0xAC00, 0xD7A4):  # 가(U+AC00) ~ 힣(U+D7A3), 11172자
-        yield chr(c)
+from PIL import Image
+import numpy as np
 
+THRESHOLD = 170
 
-if __name__ == "__main__":
-    for ch in all_chars():
-        print(ch, end=' ')
-    print()
+arr = np.array(Image.open("44.png").convert("RGB"))
+brightness = arr.mean(axis=2)
+mask = brightness > THRESHOLD
+
+arr[mask] = [255, 0, 0]
+
+result = Image.fromarray(arr)
+result = result.resize((result.width * 10, result.height * 10), Image.NEAREST)
+result.show()

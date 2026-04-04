@@ -31,7 +31,7 @@ def select_hwnd():
 
 
 if __name__ == "__main__":
-    macro.set_hwnd(4459766)
+    macro.set_hwnd(53022452)
     macro.move_window(0, 0)
 
     print("\n명령어: 1=클릭, 2=스크린샷, 3=모든 문자 전송, q=종료")

@@ -178,8 +178,9 @@ def _send_jamo(jamo: str):
 
 def send_all_chars(interval: float = 1):
     """a-z, A-Z, 한글 음절을 순서대로 입력하고, 각 문자마다 스크린샷 캡처 및 저장 후 지운다."""
+    import sys as _sys; _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
     import imageProcesser
-    from test import all_chars
+    from convert_show import all_chars
 
     os.makedirs("data", exist_ok=True)
     focus_window()

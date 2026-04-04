@@ -3,12 +3,16 @@ from PIL import Image
 import numpy as np
 
 
+_SPECIAL_CHARS = r"""~!@#$%^&*()_+-=[]{}\|;:'",<.>/?"""
+
 def all_chars():
-    """a-z, A-Z, 한글 음절(가~힣) 순서로 모든 문자를 yield한다."""
+    """a-z, A-Z, 특수문자, 한글 음절(가~힣) 순서로 모든 문자를 yield한다."""
     for c in range(ord('a'), ord('z') + 1):
         yield chr(c)
     for c in range(ord('A'), ord('Z') + 1):
         yield chr(c)
+    for ch in _SPECIAL_CHARS:
+        yield ch
     for c in range(0xAC00, 0xD7A4):
         yield chr(c)
 

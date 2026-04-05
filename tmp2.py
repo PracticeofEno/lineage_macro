@@ -1,9 +1,8 @@
-import macro
+from PIL import Image
 
-macro.set_hwnd(1117856)
-macro.move_window(0, 0)
-
-img = macro.screenshot()
-cropped = img.crop((249, 933, 269, 957))
+# img = Image.open("image/exchange2.png")
+img = Image.open("image/exchange_1_1.png")
+cropped = img.crop((102, 292, 102 + 140, 292 + 24))
 cropped.save("cropped.png")
 cropped.show()
+

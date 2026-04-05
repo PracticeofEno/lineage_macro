@@ -11,6 +11,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
 import hangul
+import imageProcesser
 
 _hwnd = None
 
@@ -132,8 +133,14 @@ def _backspace(n: int):
         time.sleep(0.01)
 
 
+def readExchangeNickname():
+    img = screenshot()
+    text = imageProcesser.readExchangeNickname(img)
+    print(text)
+    return text
+
+
 def monitor_chat():
-    import imageProcesser
     prev = None
     while True:
         img = screenshot()
@@ -147,7 +154,6 @@ def monitor_chat():
 
 def send_all_chars(interval: float = 0.2, batch_size: int = 25):
     """a-z, A-Z, 특수문자는 1글자씩 crop(10px), 한글은 batch_size씩 묶어 20px씩 개별 crop 저장."""
-    import imageProcesser
     from convert_show import all_chars
 
     os.makedirs("data2", exist_ok=True)

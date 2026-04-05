@@ -38,6 +38,20 @@ def read_text(image: Image.Image, x: int, y: int, color: tuple) -> str:
     return ''.join(result)
 
 
+def readExchangeNickname(screenshot: Image.Image) -> str:
+    x = 107
+    y, w, h = 292, 140, 24
+    color = (255, 255, 255)
+    best = ''
+    while x >= 57:
+        cropped = crop(screenshot, x, y, w, h)
+        text = read_text(cropped, 0, 0, color)
+        if len(text) > len(best):
+            best = text
+        x -= 5
+    return best
+
+
 def image_to_coord_string(image: Image.Image, color: tuple) -> str:
     arr = np.array(image.convert("RGB"))
     r, g, b = color

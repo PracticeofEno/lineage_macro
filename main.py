@@ -40,9 +40,7 @@ if __name__ == "__main__":
         if cmd == "q":
             break
         elif cmd == "1":
-            macro.focus_window()
-            macro.mouse_click_left(1015, 970)
-            print("(1015, 970) 클릭")
+            macro.readExchangeNickname()
         elif cmd == "2":
             img = macro.screenshot()
             img.save("image/screenshot.png")

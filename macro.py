@@ -60,8 +60,45 @@ def arduino_mouse_click_right(x: int, y: int):
     _arduino_send('CR')
 
 
+def arduino_mouse_shift_click_left(x: int, y: int):
+    win32api.SetCursorPos((x, y))
+    _arduino_send(f'KD,{win32con.VK_SHIFT}')
+    _arduino_send('CL')
+    _arduino_send(f'KU,{win32con.VK_SHIFT}')
+
+
 def arduino_backspace(n: int):
     _arduino_send(f'BS,{n}')
+
+
+# ── Turn (방향 이동) ───────────────────────────────────────────────────────────
+_TURN_CX, _TURN_CY = 648, 378   # 기준 중심 좌표
+_TURN_R = 150                    # 클릭 반경 (픽셀)
+_TURN_D = int(_TURN_R * 0.7071) # 대각선 거리 (R * cos45°)
+
+def turn_north():
+    arduino_mouse_shift_click_left(_TURN_CX, _TURN_CY - _TURN_R)
+
+def turn_northeast():
+    arduino_mouse_shift_click_left(_TURN_CX + _TURN_D, _TURN_CY - _TURN_D)
+
+def turn_east():
+    arduino_mouse_shift_click_left(839, 405)
+
+def turn_southeast():
+    arduino_mouse_shift_click_left(_TURN_CX + _TURN_D, _TURN_CY + _TURN_D)
+
+def turn_south():
+    arduino_mouse_shift_click_left(_TURN_CX, _TURN_CY + _TURN_R)
+
+def turn_southwest():
+    arduino_mouse_shift_click_left(_TURN_CX - _TURN_D, _TURN_CY + _TURN_D)
+
+def turn_west():
+    arduino_mouse_shift_click_left(436, 407)
+
+def turn_northwest():
+    arduino_mouse_shift_click_left(_TURN_CX - _TURN_D, _TURN_CY - _TURN_D)
 
 
 def arduino_init_cursor():

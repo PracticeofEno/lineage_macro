@@ -3,6 +3,7 @@ import sys
 import win32api
 import win32con
 import win32gui
+import win32process
 import win32ui
 import time
 import serial
@@ -77,28 +78,44 @@ _TURN_R = 150                    # 클릭 반경 (픽셀)
 _TURN_D = int(_TURN_R * 0.7071) # 대각선 거리 (R * cos45°)
 
 def turn_north():
+    global current_direction
     arduino_mouse_shift_click_left(_TURN_CX, _TURN_CY - _TURN_R)
+    current_direction = 'north'
 
 def turn_northeast():
+    global current_direction
     arduino_mouse_shift_click_left(_TURN_CX + _TURN_D, _TURN_CY - _TURN_D)
+    current_direction = 'northeast'
 
 def turn_east():
+    global current_direction
     arduino_mouse_shift_click_left(839, 405)
+    current_direction = 'east'
 
 def turn_southeast():
+    global current_direction
     arduino_mouse_shift_click_left(_TURN_CX + _TURN_D, _TURN_CY + _TURN_D)
+    current_direction = 'southeast'
 
 def turn_south():
+    global current_direction
     arduino_mouse_shift_click_left(_TURN_CX, _TURN_CY + _TURN_R)
+    current_direction = 'south'
 
 def turn_southwest():
+    global current_direction
     arduino_mouse_shift_click_left(_TURN_CX - _TURN_D, _TURN_CY + _TURN_D)
+    current_direction = 'southwest'
 
 def turn_west():
+    global current_direction
     arduino_mouse_shift_click_left(436, 407)
+    current_direction = 'west'
 
 def turn_northwest():
+    global current_direction
     arduino_mouse_shift_click_left(_TURN_CX - _TURN_D, _TURN_CY - _TURN_D)
+    current_direction = 'northwest'
 
 
 def arduino_init_cursor():
@@ -106,6 +123,9 @@ def arduino_init_cursor():
     _arduino_send('INIT')
 lineage1_mouse_x_y = None
 lineage2_mouse_x_y = None
+current_direction = 'north'
+available_count_1 = 0
+available_count_2 = 0
 exchange_yes_button = (869, 914)  # 교환 수락 Yes 좌표
 exchange_no_button = (917, 912)   # 교환 수락 No 좌표
 
@@ -188,8 +208,9 @@ def move_window(x: int, y: int):
     win32gui.MoveWindow(hwnd, x, y, width, height, True)
 
 
-def screenshot(filename: str = None) -> str:
-    hwnd = get_hwnd()
+def screenshot(filename: str = None, hwnd: int = None) -> str:
+    if hwnd is None:
+        hwnd = get_hwnd()
     rect = win32gui.GetWindowRect(hwnd)
     w = int((rect[2] - rect[0]))
     h = int((rect[3] - rect[1]))
@@ -241,24 +262,37 @@ def _backspace(n: int):
     arduino_backspace(n)
 
 
-def pickup_lineage1():
-    win32gui.SetForegroundWindow(lineage1_hwnd)
+def force_set_foreground_window(hwnd: int):
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE
+    windll.user32.keybd_event(0, 0, 0, 0)  # null 입력으로 포그라운드 권한 획득
+    win32gui.SetForegroundWindow(hwnd)
     time.sleep(0.05)
+
+
+def pickup_lineage1():
+    force_set_foreground_window(lineage1_hwnd)
+    time.sleep(0.3)
     key_press(win32con.VK_F5)
+    time.sleep(0.3)
     x, y = lineage1_mouse_x_y
     mouse_click_left(x, y)
+    time.sleep(1)
 
 
 def pickup_lineage2():
-    win32gui.SetForegroundWindow(lineage2_hwnd)
-    time.sleep(0.05)
+    force_set_foreground_window(lineage2_hwnd)
+    time.sleep(0.3)
     key_press(win32con.VK_F5)
+    time.sleep(0.3)
     x, y = lineage2_mouse_x_y
     mouse_click_left(x, y)
+    time.sleep(1)
 
 
-def checkExchangeRequest() -> bool:
-    img = screenshot()
+def checkExchangeRequest(img=None) -> bool:
+    if img is None:
+        img = screenshot()
     r, g, b = img.getpixel((848, 877))
     print(f"[macro] 교환 요청 픽셀 RGB: ({r}, {g}, {b})")
     return (r, g, b) == (0, 0, 0)
@@ -270,8 +304,9 @@ def get_brightness(image: Image.Image) -> float:
     return float(arr.mean())
 
 
-def readMp() -> int:
-    img = screenshot()
+def readMp(img=None) -> int:
+    if img is None:
+        img = screenshot()
     cropped = imageProcesser.crop(img, 717, 667, 100, 21)
     results = ocr.ocr(cropped, ['en'])
     text = ' '.join(t for _, t, _ in results)
@@ -282,7 +317,7 @@ def readMp() -> int:
 
 
 def readAdena() -> int:
-    win32gui.SetForegroundWindow(lineage1_hwnd)
+    force_set_foreground_window(lineage1_hwnd)
     win32api.SetCursorPos((1017, 82))
     time.sleep(1)
     img = screenshot()
@@ -294,7 +329,6 @@ def readExchangeNickname(img=None):
     if img is None:
         img = screenshot()
     text = imageProcesser.readExchangeNickname(img)
-    print(text)
     return text
 
 
@@ -311,32 +345,53 @@ def monitor_chat():
 
 
 def accept_exchange_and_track_adena():
-    while not checkExchangeRequest():
-        time.sleep(0.5)
+    global available_count_1, available_count_2
+    direction_threshold = 4
 
-    win32gui.SetForegroundWindow(lineage1_hwnd)
-    time.sleep(0.5)
+    # 방향 조정
+    img = screenshot(hwnd=lineage1_hwnd)
+    img2 = screenshot(hwnd=lineage2_hwnd)
+    available_count_1 = int(readMp(img) // 20)
+    available_count_2 = int(readMp(img2) // 20)
+    total_count = available_count_1 + available_count_2
+    print(f"[macro] available_count_1: {available_count_1}, available_count_2: {available_count_2}, total: {total_count}")
+    if total_count < direction_threshold:
+        if current_direction != 'northwest':
+            force_set_foreground_window(lineage1_hwnd)
+            turn_northwest()
+        return
+    else:
+        if current_direction != 'southeast':
+            force_set_foreground_window(lineage1_hwnd)
+            turn_southeast()
 
+    # 닉네임이 읽힐 때까지 F7 입력
+    while True:
+        _arduino_send(f'KP,{win32con.VK_F6 + 1}')  # F7 HID: 0x40
+        time.sleep(2)
+        img = screenshot()
+        nickname = readExchangeNickname(img)
+        if nickname:
+            break
+
+    # 2. 최초 1번 아데나 읽기
     adena_before = readAdena()
-    time.sleep(0.5)
 
-    key_press(ord('Y'))
-    time.sleep(0.1)
-    _arduino_send(f'KP,{win32con.VK_RETURN}')  # Enter 키
-    time.sleep(1)
-
+    # 3. 밝기 모니터링
     prev_brightness = None
+    brightness_changed = False
     while True:
         img = screenshot()
-        text = readExchangeNickname(img)
-        if not text:
-            break
+        nickname = readExchangeNickname(img)
+        if not nickname:
+            break  # 5. 밝기 바뀌기 전 닉네임 사라지면 종료
 
         slot = imageProcesser.crop(img, 241, 360, 30, 30)
         brightness = get_brightness(slot)
         print(f"[macro] 슬롯 밝기: {brightness:.2f}")
 
         if prev_brightness is not None and brightness != prev_brightness:
+            brightness_changed = True
             win32api.SetCursorPos((248, 585))
             time.sleep(0.5)
             _arduino_send('CL')
@@ -348,52 +403,23 @@ def accept_exchange_and_track_adena():
         prev_brightness = brightness
         time.sleep(0.5)
 
-    adena_after = readAdena()
-    received = adena_after - adena_before
-    print(f"[macro] 교환 완료: {adena_before} -> {adena_after} (+{received})")
-    return received
+    # 6. 밝기가 바뀐 후 종료된 경우 받은 아데나 계산
+    if brightness_changed:
+        adena_after = readAdena()
+        received = adena_after - adena_before
+        print(f"[macro] 교환 완료: {adena_before} -> {adena_after} (+{received})")
 
+        pickup_count = int(received // 150)
+        print(f"[macro] 픽업 횟수: {pickup_count}")
+        for _ in range(pickup_count):
+            if available_count_1 >= available_count_2:
+                available_count_1 -= 1
+                pickup_lineage1()
+            else:
+                available_count_2 -= 1
+                pickup_lineage2()
+            time.sleep(1)
 
-def send_all_chars(interval: float = 0.2, batch_size: int = 25):
-    """a-z, A-Z, 특수문자는 1글자씩 crop(10px), 한글은 batch_size씩 묶어 20px씩 개별 crop 저장."""
-    from convert_show import all_chars
-
-    os.makedirs("data2", exist_ok=True)
-    focus_window()
-
-    ascii_chars  = [ch for ch in all_chars() if ord(ch) <= 0x7F]
-    hangul_chars = [ch for ch in all_chars() if ord(ch) > 0x7F]
-
-    # 1단계: ASCII (a-z, A-Z, 특수문자) — 1글자씩, crop 10px
-    # for i, ch in enumerate(ascii_chars):
-    #     print("[macro] 문자 전송:", ch)
-    #     _send_char(ch)
-    #     time.sleep(interval)
-
-    #     img = screenshot()
-    #     cropped = imageProcesser.crop(img, 249, 933, 10, 24)
-    #     save_path = os.path.join("data2", f"{i}.png")
-    #     cropped.save(save_path)
-    #     print(f"[macro] 저장됨: {save_path}")
-
-    #     _backspace(1)
-    #     time.sleep(1)
-
-    # 2단계: 한글 — batch_size씩 입력 후 20px 간격으로 개별 crop
-    for batch_idx in range(0, len(hangul_chars), batch_size):
-        batch = hangul_chars[batch_idx:batch_idx + batch_size]
-
-        for ch in batch:
-            print("[macro] 문자 전송:", ch)
-            _send_char(ch)
-            time.sleep(interval)
-
-        img = screenshot()
-        for idx, ch in enumerate(batch):
-            cropped = imageProcesser.crop(img, 249 + idx * 20, 933, 20, 24)
-            save_path = os.path.join("data2", f"{ch}.png")
-            cropped.save(save_path)
-        print(f"[macro] 저장됨: {''.join(batch)} ({len(batch)}글자)")
-
-        _backspace(len(batch))
-        time.sleep(1)
+        if win32gui.GetForegroundWindow() != lineage1_hwnd:
+            force_set_foreground_window(lineage1_hwnd)
+        return received

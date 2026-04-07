@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import win32api
 import win32con
 import win32gui
@@ -126,6 +127,11 @@ lineage2_mouse_x_y = None
 current_direction = 'north'
 available_count_1 = 0
 available_count_2 = 0
+mp_1 = 0
+mp_2 = 0
+direction_threshold = 4
+low_count_direction = 'southeast'
+high_count_direction = 'northwest'
 exchange_yes_button = (869, 914)  # 교환 수락 Yes 좌표
 exchange_no_button = (917, 912)   # 교환 수락 No 좌표
 
@@ -178,12 +184,20 @@ def init_lineage_windows():
     print(f"[macro] lineage2_hwnd={lineage2_hwnd} ({win32gui.GetWindowText(lineage2_hwnd)})")
 
 
-def init_mouse_x_y(pos1: tuple, pos2: tuple):
+def init_mouse_x_y():
     global lineage1_mouse_x_y, lineage2_mouse_x_y
-    lineage1_mouse_x_y = pos1
-    lineage2_mouse_x_y = pos2
+    global direction_threshold, low_count_direction, high_count_direction
+    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
+    with open(data_path, encoding="utf-8") as f:
+        data = json.load(f)
+    lineage1_mouse_x_y = tuple(data["lineage1_mouse_x_y"])
+    lineage2_mouse_x_y = tuple(data["lineage2_mouse_x_y"])
+    direction_threshold = data["direction_threshold"]
+    low_count_direction = data["low_count_direction"]
+    high_count_direction = data["high_count_direction"]
     print(f"[macro] lineage1_mouse_x_y={lineage1_mouse_x_y}")
     print(f"[macro] lineage2_mouse_x_y={lineage2_mouse_x_y}")
+    print(f"[macro] direction_threshold={direction_threshold}, low={low_count_direction}, high={high_count_direction}")
 
 
 
@@ -344,26 +358,39 @@ def monitor_chat():
         time.sleep(0.5)
 
 
+_DIRECTION_FUNCS = {
+    'north': turn_north, 'northeast': turn_northeast,
+    'east': turn_east, 'southeast': turn_southeast,
+    'south': turn_south, 'southwest': turn_southwest,
+    'west': turn_west, 'northwest': turn_northwest,
+}
+
+
 def accept_exchange_and_track_adena():
-    global available_count_1, available_count_2
-    direction_threshold = 4
+    global available_count_1, available_count_2, mp_1, mp_2
 
     # 방향 조정
     img = screenshot(hwnd=lineage1_hwnd)
     img2 = screenshot(hwnd=lineage2_hwnd)
-    available_count_1 = int(readMp(img) // 20)
-    available_count_2 = int(readMp(img2) // 20)
+    _mp1 = readMp(img)
+    _mp2 = readMp(img2)
+    if _mp1 != 0:
+        mp_1 = _mp1
+    if _mp2 != 0:
+        mp_2 = _mp2
+    available_count_1 = int(mp_1 // 20)
+    available_count_2 = int(mp_2 // 20)
     total_count = available_count_1 + available_count_2
     print(f"[macro] available_count_1: {available_count_1}, available_count_2: {available_count_2}, total: {total_count}")
     if total_count < direction_threshold:
-        if current_direction != 'northwest':
+        if current_direction != low_count_direction:
             force_set_foreground_window(lineage1_hwnd)
-            turn_northwest()
-        return
+            _DIRECTION_FUNCS[low_count_direction]()
     else:
-        if current_direction != 'southeast':
+        if current_direction != high_count_direction:
             force_set_foreground_window(lineage1_hwnd)
-            turn_southeast()
+            _DIRECTION_FUNCS[high_count_direction]()
+        return
 
     # 닉네임이 읽힐 때까지 F7 입력
     while True:
@@ -410,6 +437,8 @@ def accept_exchange_and_track_adena():
         print(f"[macro] 교환 완료: {adena_before} -> {adena_after} (+{received})")
 
         pickup_count = int(received // 150)
+        if pickup_count == 3:
+            pickup_count += 1
         print(f"[macro] 픽업 횟수: {pickup_count}")
         for _ in range(pickup_count):
             if available_count_1 >= available_count_2:

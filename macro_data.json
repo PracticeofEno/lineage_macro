@@ -1,0 +1,10 @@
+{
+    "lineage1_mouse_x_y": [684, 388],
+    "lineage2_mouse_x_y": [1360, 407],
+
+    "direction_threshold": 4,
+
+    "low_count_direction": "southeast",
+    "high_count_direction": "northwest",
+    "_comment_directions": "north, northeast, east, southeast, south, southwest, west, northwest"
+}

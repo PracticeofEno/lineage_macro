@@ -512,7 +512,7 @@ def accept_exchange_and_track_adena():
         nickname = readExchangeNickname(img)
         if nickname:
             greeted_nickname = nickname
-            arduino_type_string(f"{nickname}님 안녕하세요~!")
+            arduino_type_string(f"최대 {total_count}방 입니다! 확인!")
             break
         _arduino_send(f'KP,{win32con.VK_F7}')  # F7 HID: 0x40
         time.sleep(0.5)

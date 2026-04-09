@@ -1,3 +1,4 @@
+from itertools import count
 import os
 import sys
 import json
@@ -55,12 +56,10 @@ def arduino_mouse_move(x: int, y: int):
 
 
 def arduino_mouse_click_left(x: int, y: int):
-    win32api.SetCursorPos((x, y))
     _arduino_send('CL')
 
 
 def arduino_mouse_click_right(x: int, y: int):
-    win32api.SetCursorPos((x, y))
     _arduino_send('CR')
 
 
@@ -382,23 +381,36 @@ def force_set_foreground_window(hwnd: int):
     win32gui.SetForegroundWindow(hwnd)
     time.sleep(0.05)
 
+def arduino_mouse_move_rel(dx: int, dy: int):
+    return _arduino_send(f"RM,{dx},{dy}")
+
+def shake_mouse_small(count=10, dist=10, delay=0.05):
+    for _ in range(count):
+        arduino_mouse_move_rel(dist, 0) # 오른쪽으로 2
+        time.sleep(delay)
+        arduino_mouse_move_rel(-dist, 0) # 왼쪽으로 2
+        time.sleep(delay)
 
 def pickup_lineage1():
     force_set_foreground_window(lineage1_hwnd)
+    x, y = lineage1_mouse_x_y
+    win32api.SetCursorPos((x, y))
     time.sleep(0.3)
+    shake_mouse_small(5, 10)
     key_press(win32con.VK_F5)
     time.sleep(0.3)
-    x, y = lineage1_mouse_x_y
     mouse_click_left(x, y)
     time.sleep(1)
 
 
 def pickup_lineage2():
     force_set_foreground_window(lineage2_hwnd)
+    x, y = lineage2_mouse_x_y
+    win32api.SetCursorPos((x, y))
     time.sleep(0.3)
+    shake_mouse_small(5, 10)
     key_press(win32con.VK_F5)
     time.sleep(0.3)
-    x, y = lineage2_mouse_x_y
     mouse_click_left(x, y)
     time.sleep(1)
 
@@ -486,19 +498,12 @@ def accept_exchange_and_track_adena():
         total_count = available_count_1 + available_count_2
         print(total_count, available_count_1, available_count_2, mp_1, mp_2, direction_threshold)
         if total_count < direction_threshold:
-            print("current_direction:", current_direction
-                  , "low_count_direction:", low_count_direction
-                  , "high_count_direction:", high_count_direction)
             if current_direction != low_count_direction:
                 force_set_foreground_window(lineage1_hwnd)
                 _DIRECTION_FUNCS[low_count_direction]()
                 time.sleep(1)
             return
         else:
-            print("current_direction:", current_direction
-                  , "low_count_direction:", low_count_direction
-                  , "high_count_direction:", high_count_direction)
-            print(current_direction != high_count_direction)
             if current_direction != high_count_direction:
                 force_set_foreground_window(lineage1_hwnd)
                 time.sleep(1)

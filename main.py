@@ -8,7 +8,7 @@ if __name__ == "__main__":
     macro.init_lineage_windows()
     macro.init_mouse_x_y()
 
-    print("\n명령어: q=종료  /end → http://localhost:8765/end")
+    print("\n명령어: q=종료")
     while True:
         cmd = input("> ").strip()
         if cmd == "q":

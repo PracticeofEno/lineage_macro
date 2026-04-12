@@ -487,7 +487,7 @@ def pickup_lineage1():
     force_set_foreground_window(lineage1_hwnd)
     win32api.SetCursorPos((x, y))
     time.sleep(0.3)
-    shake_mouse_small(5, 10)
+    shake_mouse_small(2, 10)
     key_press(win32con.VK_F5)
     time.sleep(0.3)
     mouse_click_left(x, y)

@@ -19,7 +19,7 @@ import imageProcesser
 HOST = '0.0.0.0'
 PORT = 9999
 ACK_TIMEOUT = 10      # 픽업 ack 대기 최대 시간(초)
-SAME_UNIT_DELAY = 2   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
+SAME_UNIT_DELAY = 1   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
 POTION_COOLDOWN = 600 # 포션 쿨타임(초)
 
 # ── 클라이언트 관리 ───────────────────────────────────────────────────────────

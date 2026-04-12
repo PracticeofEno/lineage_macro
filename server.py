@@ -1,8 +1,8 @@
 """
 server.py - Exchange 서버
   - TCP 소켓으로 클라이언트 연결 관리
-  - accept_exchange_and_track_adena 로직 수행
-  - pickup 시 연결된 클라이언트에게 명령 전송 후 ack 대기
+  - ping-pong 시 각 client MP를 수신하여 개별 저장
+  - pickup 시 서버/클라이언트 픽업 분배
 """
 
 import socket
@@ -15,15 +15,22 @@ import win32gui
 
 import macro
 import imageProcesser
-import ocr
 
 HOST = '0.0.0.0'
 PORT = 9999
-ACK_TIMEOUT = 10  # 픽업 ack 대기 최대 시간(초)
+ACK_TIMEOUT = 10      # 픽업 ack 대기 최대 시간(초)
+SAME_UNIT_DELAY = 2   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
 
 # ── 클라이언트 관리 ───────────────────────────────────────────────────────────
-_clients: list[tuple[socket.socket, tuple]] = []
+# client: {"conn": socket, "addr": tuple, "lock": Lock, "mp": int, "idx": int}
+# idx  : 클라이언트 실행 시 인자로 지정 (0=서버와 같은 PC, 같은 PC끼리 동일 idx 사용)
+# lock : ping-pong과 pickup 명령이 같은 소켓을 동시에 사용하지 않도록 보호
+_clients: list[dict] = []
 _clients_lock = threading.Lock()
+
+def _group_key(idx: int) -> int:
+    """같은 idx는 같은 PC 그룹. 서버(-1)는 idx=0과 동일 그룹으로 정규화"""
+    return 0 if idx == -1 else idx
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
 _server_running = True  # accept 루프 제어 (q 입력 시에만 False)
@@ -50,29 +57,53 @@ def _recv_json(conn: socket.socket) -> dict | None:
         return None
 
 
-def _remove_client(conn: socket.socket, addr: tuple):
+def _remove_client(client: dict):
     with _clients_lock:
-        _clients[:] = [(c, a) for c, a in _clients if c is not conn]
+        _clients[:] = [e for e in _clients if e is not client]
     try:
-        conn.close()
+        client["conn"].close()
     except OSError:
         pass
-    print(f"[server] 클라이언트 제거됨: {addr}")
+    print(f"[server] 클라이언트 제거됨: {client['addr']}")
 
 
 def _handle_client(conn: socket.socket, addr: tuple):
-    print(f"[server] 클라이언트 연결: {addr}")
+    # 첫 메시지로 클라이언트가 보낸 idx 수신
+    conn.settimeout(10)
+    reg = _recv_json(conn)
+    conn.settimeout(None)
+    if reg is None or reg.get("cmd") != "register":
+        print(f"[server] 등록 실패 (잘못된 메시지): {addr}")
+        conn.close()
+        return
+    idx = reg.get("idx")
+    if not isinstance(idx, int):
+        print(f"[server] 등록 실패 (idx 없음): {addr}")
+        conn.close()
+        return
+
+    client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "idx": idx, "available": 0}
+    unit_str = "서버PC" if idx == 0 else f"유닛{idx}"
+    print(f"[server] 클라이언트 등록: {addr}  (idx={idx}, {unit_str})")
     with _clients_lock:
-        _clients.append((conn, addr))
-    # 클라이언트가 연결을 끊을 때까지 유지 (명령은 메인 스레드에서 전송)
+        _clients.append(client)
     try:
         while True:
-            # heartbeat: 5초마다 ping
             time.sleep(5)
-            if not _send_json(conn, {"cmd": "ping"}):
-                break
+            with client["lock"]:
+                if not _send_json(conn, {"cmd": "ping"}):
+                    break
+                conn.settimeout(10)
+                resp = _recv_json(conn)
+                conn.settimeout(None)
+                if resp is None:
+                    break
+                if resp.get("status") == "pong":
+                    client["mp"] = resp.get("mp", 0)
+                    client["available"] = int(client["mp"] // 20)
+                    print(f"[server] client {addr} MP: {client['mp']}  available: {client['available']}")
     finally:
-        _remove_client(conn, addr)
+        _remove_client(client)
 
 
 def _accept_loop(server_sock: socket.socket):
@@ -86,40 +117,33 @@ def _accept_loop(server_sock: socket.socket):
 
 
 # ── 픽업 명령 전송 ─────────────────────────────────────────────────────────────
-def _send_pickup(target: str) -> bool:
-    """
-    연결된 클라이언트 중 첫 번째에게 pickup 명령을 보내고 ack를 기다린다.
-    클라이언트가 없으면 False 반환.
-    """
-    with _clients_lock:
-        if not _clients:
-            print("[server] 연결된 클라이언트 없음 - 픽업 스킵")
+def _send_pickup(client: dict) -> bool:
+    """특정 클라이언트에게 pickup 명령을 보내고 ack를 기다린다."""
+    conn = client["conn"]
+    addr = client["addr"]
+    with client["lock"]:
+        if not _send_json(conn, {"cmd": "pickup", "target": "lineage1"}):
+            _remove_client(client)
             return False
-        conn, addr = _clients[0]
 
-    if not _send_json(conn, {"cmd": "pickup", "target": target}):
-        _remove_client(conn, addr)
+        conn.settimeout(ACK_TIMEOUT)
+        resp = _recv_json(conn)
+        conn.settimeout(None)
+
+        if resp is None:
+            print(f"[server] ack 수신 실패 - 클라이언트 제거: {addr}")
+            _remove_client(client)
+            return False
+
+        if resp.get("status") == "ok":
+            print(f"[server] 픽업 완료 ack 수신 from {addr}")
+            return True
+
+        print(f"[server] 예상치 못한 응답: {resp}")
         return False
 
-    # ack 수신 (timeout 적용)
-    conn.settimeout(ACK_TIMEOUT)
-    resp = _recv_json(conn)
-    conn.settimeout(None)
 
-    if resp is None:
-        print(f"[server] ack 수신 실패 - 클라이언트 제거: {addr}")
-        _remove_client(conn, addr)
-        return False
-
-    if resp.get("status") == "ok":
-        print(f"[server] 픽업 완료 ack 수신 ({target}) from {addr}")
-        return True
-
-    print(f"[server] 예상치 못한 응답: {resp}")
-    return False
-
-
-# ── Exchange 루프 (accept_exchange_and_track_adena 변형) ──────────────────────
+# ── Exchange 루프 ──────────────────────────────────────────────────────────────
 def exchange_loop():
     global running
 
@@ -131,6 +155,7 @@ def exchange_loop():
     prev_brightness = None
     brightness_changed = False
     _last_type_string_time = 0
+    clients_snapshot = []
 
     while running:
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
@@ -139,9 +164,20 @@ def exchange_loop():
             _mp1 = macro.readMp(img)
             if _mp1 != 0:
                 macro.mp_1 = _mp1
-            macro.available_count_1 = int(macro.mp_1 // 20)
-            total_count = macro.available_count_1
-            print(total_count, macro.available_count_1, macro.mp_1, macro.direction_threshold)
+
+            with _clients_lock:
+                for e in _clients:
+                    if e["idx"] == -1:
+                        e["mp"] = macro.mp_1
+                        e["available"] = int(macro.mp_1 // 20)
+                        break
+                clients_snapshot = list(_clients)
+
+            total_count = sum(e["available"] for e in clients_snapshot)
+            print(f"total={total_count}  threshold={macro.direction_threshold}")
+            for e in clients_snapshot:
+                label = "server" if e["idx"] == -1 else f"client {e['addr']}"
+                print(f"  {label}: {e['available']}회({e['mp']}MP)")
 
             if total_count < macro.direction_threshold:
                 if macro.current_direction != macro.low_count_direction:
@@ -166,7 +202,7 @@ def exchange_loop():
             nickname = macro.readExchangeNickname(macro.screenshot())
             if nickname:
                 greeted_nickname = nickname
-                macro.arduino_type_string(f"최대 {total_count}방 입니다! 확인!")
+                # macro.arduino_type_string(f"최대 {total_count}방 입니다! 확인!")
                 stage = READ_ADENA
                 continue
 
@@ -202,10 +238,9 @@ def exchange_loop():
             prev_brightness = brightness
             time.sleep(0.5)
 
-        # ── Stage 4: 받은 아데나 계산 → 클라이언트에 픽업 명령 ──────────────
+        # ── Stage 4: 받은 아데나 계산 → 서버/클라이언트 픽업 분배 ──────────
         elif stage == PICKUP:
             if not brightness_changed:
-                # 교환 없이 닉네임만 사라진 경우
                 stage = WAIT_NICKNAME
                 greeted_nickname = None
                 adena_before = None
@@ -220,13 +255,57 @@ def exchange_loop():
             pickup_count = int(received // macro.adena_per_pickup)
             print(f"[server] 픽업 횟수: {pickup_count}")
 
-            # 활성 윈도우가 server가 아니라면 포그라운드로 전환해야함
+            remaining = pickup_count
+            # ── 픽업 분배 ───────────────────────────────────────────────────
+            # 매 라운드: 그룹별 available 최고 대표 선출 → idx 내림차순 전송
+            # 같은 그룹(-1/0)은 SAME_UNIT_DELAY 이내 재전송 금지
+            last_group_time: dict = {}
+
+            while remaining > 0:
+                # 그룹별 available 최고 클라이언트 선출
+                groups: dict = {}
+                for c in clients_snapshot:
+                    gk = _group_key(c["idx"])
+                    if gk not in groups or c["available"] > groups[gk]["available"]:
+                        groups[gk] = c
+
+                if not groups:
+                    break
+
+                # idx 내림차순 정렬
+                ordered = sorted(groups.values(), key=lambda c: c["idx"], reverse=True)
+
+                sent_any = False
+                for c in ordered:
+                    if remaining <= 0:
+                        break
+                    gk = _group_key(c["idx"])
+                    elapsed = time.time() - last_group_time.get(gk, 0)
+                    if elapsed < SAME_UNIT_DELAY:
+                        time.sleep(SAME_UNIT_DELAY - elapsed)
+
+                    label = "server" if c["idx"] == -1 else f"client{c['addr']}"
+                    print(f"[server] pickup → {label} (remaining={remaining})")
+
+                    if c["idx"] == -1:
+                        macro.pickup()
+                        ok = True
+                    else:
+                        ok = _send_pickup(c)
+
+                    last_group_time[gk] = time.time()
+                    if ok:
+                        remaining -= 1
+                        sent_any = True
+
+                if not sent_any:
+                    break
+
             if win32gui.GetForegroundWindow() != macro.lineage1_hwnd:
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
             time.sleep(0.5)
             # macro.arduino_type_string(f"{greeted_nickname}님 고맙습니다~!")
 
-            # 상태 초기화 후 다음 교환 대기
             stage = WAIT_NICKNAME
             greeted_nickname = None
             adena_before = None
@@ -246,6 +325,10 @@ if __name__ == "__main__":
     print(f"[server] 대기 중: {HOST}:{PORT}")
 
     threading.Thread(target=_accept_loop, args=(server_sock,), daemon=True).start()
+
+    # 서버 자신을 idx=-1 로 _clients에 등록 (conn/addr/lock 없음)
+    with _clients_lock:
+        _clients.append({"idx": -1, "mp": 0, "available": 0})
 
     print("\n명령어: q=종료, 1=exchange 시작, 2=exchange 중지")
     exchange_thread = None

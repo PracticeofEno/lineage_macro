@@ -20,10 +20,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "too
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hangul
 import imageProcesser
-import ocr
 
 lineage1_hwnd = None
-lineage2_hwnd = None
 
 # ── Arduino Proxy 연결 ────────────────────────────────────────────────────────
 # arduino_proxy.py 가 127.0.0.1:9998 에서 실행 중이어야 한다.
@@ -254,18 +252,15 @@ def turn_northwest():
 def arduino_init_cursor():
     """커서를 화면 (0, 0) 으로 초기화한다. 프로그램 시작 시 한 번 호출 권장."""
     _arduino_send('INIT')
+
 lineage1_mouse_x_y = None
-lineage2_mouse_x_y = None
 current_direction = 'north'
 available_count_1 = 0
-available_count_2 = 0
 mp_1 = 0
-mp_2 = 0
 direction_threshold = 4
 adena_per_pickup = 150
 low_count_direction = 'southeast'
 high_count_direction = 'northwest'
-_last_type_string_time = 0
 exchange_yes_button = (869, 914)  # 교환 수락 Yes 좌표
 exchange_no_button = (917, 912)   # 교환 수락 No 좌표
 
@@ -360,14 +355,13 @@ def init_lineage_windows(role: str):
 
 
 def init_mouse_x_y():
-    global lineage1_mouse_x_y, lineage2_mouse_x_y
+    global lineage1_mouse_x_y
     global direction_threshold, adena_per_pickup, current_direction, low_count_direction, high_count_direction
     global _TURN_XY
     data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
     with open(data_path, encoding="utf-8") as f:
         data = json.load(f)
     lineage1_mouse_x_y = tuple(data["lineage1_mouse_x_y"])
-    lineage2_mouse_x_y = tuple(data["lineage2_mouse_x_y"])
     direction_threshold = data["direction_threshold"]
     adena_per_pickup = data["adena_per_pickup"]
     current_direction = data["current_direction"]
@@ -376,7 +370,6 @@ def init_mouse_x_y():
     for d in ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest']:
         _TURN_XY[d] = tuple(data[f"turn_{d}_xy"])
     print(f"[macro] lineage1_mouse_x_y={lineage1_mouse_x_y}")
-    print(f"[macro] lineage2_mouse_x_y={lineage2_mouse_x_y}")
     print(f"[macro] direction_threshold={direction_threshold}, current={current_direction}, low={low_count_direction}, high={high_count_direction}")
     print(f"[macro] turn_xy={_TURN_XY}")
 
@@ -474,6 +467,12 @@ def shake_mouse_small(count=10, dist=10, delay=0.05):
         arduino_mouse_move_rel(-dist, 0) # 왼쪽으로 2
         time.sleep(delay)
 
+def use_potion():
+    force_set_foreground_window(lineage1_hwnd)
+    time.sleep(0.5)
+    _arduino_send(f'KP,{win32con.VK_F8}')
+
+
 def pickup_lineage1():
     force_set_foreground_window(lineage1_hwnd)
     x, y = lineage1_mouse_x_y
@@ -485,17 +484,6 @@ def pickup_lineage1():
     mouse_click_left(x, y)
     time.sleep(1)
 
-
-def pickup_lineage2():
-    force_set_foreground_window(lineage2_hwnd)
-    x, y = lineage2_mouse_x_y
-    win32api.SetCursorPos((x, y))
-    time.sleep(0.3)
-    shake_mouse_small(5, 10)
-    key_press(win32con.VK_F5)
-    time.sleep(0.3)
-    mouse_click_left(x, y)
-    time.sleep(1)
 
 
 def checkExchangeRequest(img=None) -> bool:
@@ -566,116 +554,3 @@ _DIRECTION_FUNCS = {
     'west': turn_west, 'northwest': turn_northwest,
 }
 
-
-def accept_exchange_and_track_adena():
-    import main
-    global available_count_1, available_count_2, mp_1, mp_2, _last_type_string_time
-
-    WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(4)
-    stage = WAIT_NICKNAME
-
-    greeted_nickname = None
-    adena_before = None
-    prev_brightness = None
-    brightness_changed = False
-
-    while main.running:
-
-        # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
-        if stage == WAIT_NICKNAME:
-            img = screenshot(hwnd=lineage1_hwnd)
-            img2 = screenshot(hwnd=lineage2_hwnd)
-            _mp1 = readMp(img)
-            _mp2 = readMp(img2)
-            if _mp1 != 0:
-                mp_1 = _mp1
-            if _mp2 != 0:
-                mp_2 = _mp2
-            available_count_1 = int(mp_1 // 20)
-            available_count_2 = int(mp_2 // 20)
-            total_count = available_count_1 + available_count_2
-            print(total_count, available_count_1, available_count_2, mp_1, mp_2, direction_threshold)
-
-            if total_count < direction_threshold:
-                if current_direction != low_count_direction:
-                    force_set_foreground_window(lineage1_hwnd)
-                    _DIRECTION_FUNCS[low_count_direction]()
-                    time.sleep(1)
-                return
-            else:
-                if current_direction != high_count_direction:
-                    force_set_foreground_window(lineage1_hwnd)
-                    time.sleep(1)
-                    _DIRECTION_FUNCS[high_count_direction]()
-                    time.sleep(1)
-
-            if time.time() - _last_type_string_time >= 5:
-                arduino_type_string(f"\\f2 방당 {adena_per_pickup} \\f= {total_count}방 가능")
-                _last_type_string_time = time.time()
-
-            nickname = readExchangeNickname(screenshot())
-            if nickname:
-                greeted_nickname = nickname
-                arduino_type_string(f"최대 {total_count}방 입니다! 확인!")
-                stage = READ_ADENA
-                continue
-
-            _arduino_send(f'KP,{win32con.VK_F7}')
-            time.sleep(0.5)
-
-        # ── Stage 2: 교환 전 아데나 1회 측정 ────────────────────────────────
-        elif stage == READ_ADENA:
-            adena_before = readAdena()
-            stage = MONITOR_BRIGHTNESS
-
-        # ── Stage 3: 슬롯 밝기 감시 → 변화 시 교환 수락 ────────────────────
-        elif stage == MONITOR_BRIGHTNESS:
-            img = screenshot()
-            if not readExchangeNickname(img):
-                stage = PICKUP
-                continue
-
-            slot = imageProcesser.crop(img, 241, 360, 30, 30)
-            brightness = get_brightness(slot)
-            print(f"[macro] 슬롯 밝기: {brightness:.2f}")
-
-            if prev_brightness is not None and brightness != prev_brightness:
-                brightness_changed = True
-                win32api.SetCursorPos((248, 585))
-                time.sleep(0.5)
-                _arduino_send('CL')
-                time.sleep(0.5)
-                key_press(ord('Y'))
-                time.sleep(0.1)
-                _arduino_send(f'KP,{win32con.VK_RETURN}')
-
-            prev_brightness = brightness
-            time.sleep(0.5)
-
-        # ── Stage 4: 받은 아데나 계산 → 픽업 → 인사 ────────────────────────
-        elif stage == PICKUP:
-            if not brightness_changed:
-                break
-
-            adena_after = readAdena()
-            received = adena_after - adena_before
-            print(f"[macro] 교환 완료: {adena_before} -> {adena_after} (+{received})")
-
-            pickup_count = int(received // adena_per_pickup)
-            print(f"[macro] 픽업 횟수: {pickup_count}")
-            for _ in range(pickup_count):
-                if available_count_1 >= available_count_2:
-                    available_count_1 -= 1
-                    mp_1 -= 20
-                    pickup_lineage1()
-                else:
-                    available_count_2 -= 1
-                    mp_2 -= 20
-                    pickup_lineage2()
-                time.sleep(1)
-
-            if win32gui.GetForegroundWindow() != lineage1_hwnd:
-                force_set_foreground_window(lineage1_hwnd)
-            time.sleep(0.5)
-            arduino_type_string(f"{greeted_nickname}님 고맙습니다~!")
-            return received

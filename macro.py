@@ -515,14 +515,15 @@ def get_brightness(image: Image.Image) -> float:
 def readMp(img=None) -> int:
     if img is None:
         img = screenshot()
-    cropped = imageProcesser.crop(img, 715, 667, 100, 21)
-    results = ocr.ocr(cropped, ['en'])
-    text = ' '.join(t for _, t, _ in results)
-    print(f"[macro] MP OCR 결과: '{text}'")
-    if '/' not in text:
-        return 0
-    before_slash = text.split('/')[0].strip()
-    return int(''.join(c for c in before_slash if c.isdigit()) or 0)
+    for dx in (0, 5, 10):
+        cropped = imageProcesser.crop(img, 976 + dx, 96, 100, 21)
+        text = imageProcesser.read_text(cropped, 0, 0, (0xCC, 0xE3, 0xFF))
+        print(text)
+        parts = text.split('/')
+        digits = ''.join(c for c in parts[0] if c.isdigit())
+        if digits:
+            return int(digits)
+    return 0
 
 
 def readAdena() -> int:

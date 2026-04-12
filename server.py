@@ -284,7 +284,8 @@ def exchange_loop():
 
             pickup_count = int(received // macro.adena_per_pickup)
             print(f"[server] 픽업 횟수: {pickup_count}")
-        
+            remaining = pickup_count
+            
             # ── 픽업 분배 ───────────────────────────────────────────────────
             # 매 라운드: 그룹별 available 최고 대표 선출 → idx 내림차순 전송
             # 같은 그룹(-1/0)은 SAME_UNIT_DELAY 이내 재전송 금지

@@ -300,37 +300,33 @@ def exchange_loop():
             remaining = min(pickup_count, total_available)
 
             # ── 픽업 분배 ───────────────────────────────────────────────────
-            # 매 라운드: idx별 available 최고 대표 선출 → idx 내림차순 전송
-            # 같은 idx(같은 PC)는 SAME_UNIT_DELAY 이내 재전송 금지
-            last_group_time: dict = {}
+            # 매 라운드: 전체 중 available 최댓값 탐색
+            #   → 공유자 여럿이면 idx 내림차순 모두 실행
+            #   → 혼자면 해당 client만 실행
+            # 같은 idx는 SAME_UNIT_DELAY 이내 재전송 금지
+            last_idx_time: dict = {}
 
             while remaining > 0:
-                # 그룹별 available 최고 클라이언트 선출 (available=0 제외)
-                groups: dict = {}
-                for c in clients_snapshot:
-                    if c["available"] <= 0:
-                        continue
-                    gk = c["idx"]
-                    if gk not in groups or c["available"] > groups[gk]["available"]:
-                        groups[gk] = c
-
-                if not groups:
+                with_avail = [c for c in clients_snapshot if c["available"] > 0]
+                if not with_avail:
                     break
 
-                # idx 내림차순 정렬
-                ordered = sorted(groups.values(), key=lambda c: c["idx"], reverse=True)
+                max_avail = max(c["available"] for c in with_avail)
+                candidates = sorted(
+                    [c for c in with_avail if c["available"] == max_avail],
+                    key=lambda c: c["idx"], reverse=True
+                )
 
                 sent_any = False
-                for c in ordered:
+                for c in candidates:
                     if remaining <= 0:
                         break
-                    gk = c["idx"]
-                    elapsed = time.time() - last_group_time.get(gk, 0)
+                    elapsed = time.time() - last_idx_time.get(c["idx"], 0)
                     if elapsed < SAME_UNIT_DELAY:
                         time.sleep(SAME_UNIT_DELAY - elapsed)
 
                     label = "server" if "conn" not in c else f"client{c['addr']}"
-                    print(f"[server] pickup → {label} (remaining={remaining})")
+                    print(f"[server] pickup → {label} (avail={c['available']}, remaining={remaining})")
 
                     if "conn" not in c:  # 서버 로컬 실행
                         macro.pickup_lineage1()
@@ -338,7 +334,7 @@ def exchange_loop():
                     else:
                         ok = _send_pickup(c)
 
-                    last_group_time[gk] = time.time()
+                    last_idx_time[c["idx"]] = time.time()
                     if ok:
                         remaining -= 1
                         c["available"] -= 1

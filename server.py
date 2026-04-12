@@ -272,6 +272,7 @@ def exchange_loop():
                 prev_brightness = None
                 brightness_changed = False
                 continue
+            time.sleep(0.5)
             adena_after = macro.readAdena()
             print(f"[server] 아데나 변화 감지: {adena_before} → {adena_after}")
             received = adena_after - adena_before

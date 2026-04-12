@@ -312,6 +312,7 @@ def exchange_loop():
                     [c for c in with_avail if pickup_avail[id(c)] == max_avail],
                     key=lambda c: c["idx"], reverse=True
                 )
+                print(f"candidates: {candidates}")
 
                 sent_any = False
                 for c in candidates:

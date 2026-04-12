@@ -234,7 +234,7 @@ def exchange_loop():
                 stage = READ_ADENA
                 continue
 
-            macro._arduino_send(f'KP,{win32con.VK_F7}')
+            # macro._arduino_send(f'KP,{win32con.VK_F7}')
             time.sleep(0.5)
 
         # ── Stage 2: 교환 전 아데나 1회 측정 ────────────────────────────────
@@ -284,8 +284,7 @@ def exchange_loop():
 
             pickup_count = int(received // macro.adena_per_pickup)
             print(f"[server] 픽업 횟수: {pickup_count}")
-
-            remaining = min(pickup_count, macro.direction_threshold)
+        
             # ── 픽업 분배 ───────────────────────────────────────────────────
             # 매 라운드: 그룹별 available 최고 대표 선출 → idx 내림차순 전송
             # 같은 그룹(-1/0)은 SAME_UNIT_DELAY 이내 재전송 금지

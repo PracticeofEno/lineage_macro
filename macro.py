@@ -9,7 +9,8 @@ import win32gui
 import win32process
 import win32ui
 import time
-import serial
+import socket as _socket
+import threading as _threading
 import numpy as np
 from ctypes import windll
 from datetime import datetime
@@ -23,7 +24,21 @@ import ocr
 
 lineage1_hwnd = None
 lineage2_hwnd = None
-arduino = serial.Serial('COM5', 115200, timeout=1)
+
+# ── Arduino Proxy 연결 ────────────────────────────────────────────────────────
+# arduino_proxy.py 가 127.0.0.1:9998 에서 실행 중이어야 한다.
+_PROXY_HOST = '127.0.0.1'
+_PROXY_PORT = 9998
+_proxy_conn: _socket.socket | None = None
+_proxy_lock = _threading.Lock()
+
+
+def _proxy_connect():
+    global _proxy_conn
+    s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    s.connect((_PROXY_HOST, _PROXY_PORT))
+    _proxy_conn = s
+    print(f"[macro] Arduino proxy 연결됨: {_PROXY_HOST}:{_PROXY_PORT}")
 
 
 # ── Arduino HID 래퍼 ──────────────────────────────────────────────────────────
@@ -31,9 +46,36 @@ arduino = serial.Serial('COM5', 115200, timeout=1)
 # Python 쪽은 Windows VK 코드를 그대로 넘기면 Arduino 가 HID 코드로 변환한다.
 
 def _arduino_send(cmd: str) -> str:
-    """명령 전송 후 Arduino 의 'OK' 응답을 기다린다."""
-    arduino.write((cmd + '\n').encode())
-    return arduino.readline().decode().strip()
+    """명령을 proxy 에 전송하고 Arduino 의 응답을 반환한다."""
+    global _proxy_conn
+    with _proxy_lock:
+        if _proxy_conn is None:
+            _proxy_connect()
+        try:
+            _proxy_conn.sendall((cmd + '\n').encode())
+            buf = b''
+            while b'\n' not in buf:
+                chunk = _proxy_conn.recv(256)
+                if not chunk:
+                    raise OSError("proxy 연결 끊김")
+                buf += chunk
+            return buf.split(b'\n')[0].decode().strip()
+        except OSError:
+            # 재연결 한 번 시도
+            try:
+                _proxy_conn.close()
+            except OSError:
+                pass
+            _proxy_conn = None
+            _proxy_connect()
+            _proxy_conn.sendall((cmd + '\n').encode())
+            buf = b''
+            while b'\n' not in buf:
+                chunk = _proxy_conn.recv(256)
+                if not chunk:
+                    raise OSError("proxy 재연결 후에도 응답 없음")
+                buf += chunk
+            return buf.split(b'\n')[0].decode().strip()
 
 
 def arduino_key_down(vk: int):

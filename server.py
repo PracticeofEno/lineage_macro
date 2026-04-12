@@ -227,7 +227,7 @@ def exchange_loop():
                 macro.arduino_type_string(random.choice(_ad_formats))
                 _last_type_string_time = time.time()
 
-            nickname = macro.readExchangeNickname(macro.screenshot())
+            nickname = macro.readExchangeNickname(img=img)
             if nickname:
                 greeted_nickname = nickname
                 # macro.arduino_type_string(f"최대 {total_count}방 입니다! 확인!")

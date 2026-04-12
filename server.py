@@ -283,8 +283,8 @@ def exchange_loop():
             print(f"[server] 교환 완료: {adena_before} -> {adena_after} (+{received})")
 
             pickup_count = int(received // macro.adena_per_pickup)
-            print(f"[server] 픽업 횟수: {pickup_count}")
-            remaining = pickup_count
+            total_available = sum(e["available"] for e in clients_snapshot)
+            remaining = min(pickup_count, total_available)
 
             # ── 픽업 분배 ───────────────────────────────────────────────────
             # 매 라운드: 그룹별 available 최고 대표 선출 → idx 내림차순 전송

@@ -136,18 +136,12 @@ def exchange_loop():
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
             img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-            img2 = macro.screenshot(hwnd=macro.lineage2_hwnd)
             _mp1 = macro.readMp(img)
-            _mp2 = macro.readMp(img2)
             if _mp1 != 0:
                 macro.mp_1 = _mp1
-            if _mp2 != 0:
-                macro.mp_2 = _mp2
             macro.available_count_1 = int(macro.mp_1 // 20)
-            macro.available_count_2 = int(macro.mp_2 // 20)
-            total_count = macro.available_count_1 + macro.available_count_2
-            print(total_count, macro.available_count_1, macro.available_count_2,
-                  macro.mp_1, macro.mp_2, macro.direction_threshold)
+            total_count = macro.available_count_1
+            print(total_count, macro.available_count_1, macro.mp_1, macro.direction_threshold)
 
             if total_count < macro.direction_threshold:
                 if macro.current_direction != macro.low_count_direction:
@@ -226,23 +220,11 @@ def exchange_loop():
             pickup_count = int(received // macro.adena_per_pickup)
             print(f"[server] 픽업 횟수: {pickup_count}")
 
-            for _ in range(pickup_count):
-                if macro.available_count_1 >= macro.available_count_2:
-                    target = "lineage1"
-                    macro.available_count_1 -= 1
-                    macro.mp_1 -= 20
-                else:
-                    target = "lineage2"
-                    macro.available_count_2 -= 1
-                    macro.mp_2 -= 20
-
-                _send_pickup(target)
-                time.sleep(1)
-
+            # 활성 윈도우가 server가 아니라면 포그라운드로 전환해야함
             if win32gui.GetForegroundWindow() != macro.lineage1_hwnd:
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
             time.sleep(0.5)
-            macro.arduino_type_string(f"{greeted_nickname}님 고맙습니다~!")
+            # macro.arduino_type_string(f"{greeted_nickname}님 고맙습니다~!")
 
             # 상태 초기화 후 다음 교환 대기
             stage = WAIT_NICKNAME

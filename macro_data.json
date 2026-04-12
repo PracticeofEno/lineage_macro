@@ -1,6 +1,7 @@
 {
-    "lineage1_mouse_x_y": [684, 337],
-    "lineage2_mouse_x_y": [1359, 314],
+    "server_mouse_x_y": [684, 337],
+    "client_mouse_x_y": [1359, 314],
+    "client_numbering_mouse_x_y": [1359, 314],
 
     "direction_threshold": 1,
     "adena_per_pickup": 100,

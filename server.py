@@ -315,8 +315,7 @@ def exchange_loop():
 
 # ── 진입점 ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    macro.init_lineage_windows("server")
-    macro.init_mouse_x_y()
+    macro.init_setting("server")
 
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

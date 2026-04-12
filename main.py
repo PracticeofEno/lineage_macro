@@ -6,8 +6,7 @@ import imageProcesser
 running = True
 
 if __name__ == "__main__":
-    macro.init_lineage_windows("server")
-    macro.init_mouse_x_y()
+    macro.init_setting("server")
 
     print("\n명령어: q=종료")
     while True:

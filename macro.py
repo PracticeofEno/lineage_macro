@@ -253,7 +253,7 @@ def arduino_init_cursor():
     """커서를 화면 (0, 0) 으로 초기화한다. 프로그램 시작 시 한 번 호출 권장."""
     _arduino_send('INIT')
 
-lineage1_mouse_x_y = None
+_mouse_key: str | None = None
 current_direction = 'north'
 available_count_1 = 0
 mp_1 = 0
@@ -292,16 +292,20 @@ def get_hwnd() -> int:
     return lineage1_hwnd
 
 
-def init_lineage_windows(role: str):
+def init_setting(role: str):
     """
     role: "server" 또는 "client"
-    "Lineage Classic" 으로 시작하는 윈도우를 하나 찾아 lineage1_hwnd에 설정한다.
-    - server: 타이틀을 "server"로 변경
-    - client: 이미 사용 중인 client1, client2... 를 확인해 다음 번호로 타이틀 변경
+    1. "Lineage Classic"으로 시작하는 윈도우를 찾아 타이틀 설정 및 lineage1_hwnd 지정
+    2. macro_data.json에서 설정 로드:
+       - direction 설정은 공통 적용
+       - mouse x,y는 타이틀에 따라 server/client/client_numbering 키 사용
     """
     global lineage1_hwnd
+    global _mouse_key
+    global direction_threshold, adena_per_pickup, current_direction, low_count_direction, high_count_direction
+    global _TURN_XY
 
-    # 모든 가시 창 수집
+    # ── 윈도우 탐색 및 타이틀 설정 ────────────────────────────────────────────
     all_windows: dict[str, int] = {}
     def callback(hwnd, _):
         if win32gui.IsWindowVisible(hwnd):
@@ -309,12 +313,10 @@ def init_lineage_windows(role: str):
     win32gui.EnumWindows(callback, None)
 
     if role == "server":
-        # 이미 "server" 타이틀이 있으면 그대로 채택
         if "server" in all_windows:
             lineage1_hwnd = all_windows["server"]
             new_title = "server"
         else:
-            # 없으면 "Lineage Classic" 창을 찾아 이름 변경
             candidates = [hwnd for title, hwnd in all_windows.items() if title.startswith("Lineage Classic")]
             if not candidates:
                 raise RuntimeError("'Lineage Classic'으로 시작하는 윈도우를 찾을 수 없습니다.")
@@ -323,9 +325,7 @@ def init_lineage_windows(role: str):
             new_title = "server"
     else:
         candidates = [hwnd for title, hwnd in all_windows.items() if title.startswith("Lineage Classic")]
-
         if "server" in all_windows:
-            # server가 있는 경우: client가 있으면 그 핸들 사용, 없으면 Lineage Classic → "client"
             if "client" in all_windows:
                 lineage1_hwnd = all_windows["client"]
                 new_title = "client"
@@ -336,7 +336,6 @@ def init_lineage_windows(role: str):
                 win32gui.SetWindowText(lineage1_hwnd, "client")
                 new_title = "client"
         else:
-            # server가 없는 경우: Lineage Classic을 찾아 client 또는 client numbering
             if not candidates:
                 raise RuntimeError("'Lineage Classic'으로 시작하는 윈도우를 찾을 수 없습니다.")
             if "client" not in all_windows:
@@ -353,15 +352,21 @@ def init_lineage_windows(role: str):
     win32gui.MoveWindow(lineage1_hwnd, 0, 0, rect[2] - rect[0], rect[3] - rect[1], True)
     print(f"[macro] lineage1_hwnd={lineage1_hwnd} → 타이틀 '{new_title}', 위치 (0, 0)")
 
-
-def init_mouse_x_y():
-    global lineage1_mouse_x_y
-    global direction_threshold, adena_per_pickup, current_direction, low_count_direction, high_count_direction
-    global _TURN_XY
+    # ── JSON 설정 로드 ─────────────────────────────────────────────────────────
     data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
     with open(data_path, encoding="utf-8") as f:
         data = json.load(f)
-    lineage1_mouse_x_y = tuple(data["lineage1_mouse_x_y"])
+
+    # 타이틀에 따라 mouse x,y 키 결정
+    if new_title == "server":
+        mouse_key = "server_mouse_x_y"
+    elif new_title == "client":
+        mouse_key = "client_mouse_x_y"
+    else:  # client2, client3, ...
+        mouse_key = "client_numbering_mouse_x_y"
+
+    _mouse_key = mouse_key
+
     direction_threshold = data["direction_threshold"]
     adena_per_pickup = data["adena_per_pickup"]
     current_direction = data["current_direction"]
@@ -369,7 +374,8 @@ def init_mouse_x_y():
     high_count_direction = data["high_count_direction"]
     for d in ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest']:
         _TURN_XY[d] = tuple(data[f"turn_{d}_xy"])
-    print(f"[macro] lineage1_mouse_x_y={lineage1_mouse_x_y}")
+
+    print(f"[macro] mouse_key={mouse_key}")
     print(f"[macro] direction_threshold={direction_threshold}, current={current_direction}, low={low_count_direction}, high={high_count_direction}")
     print(f"[macro] turn_xy={_TURN_XY}")
 
@@ -474,8 +480,11 @@ def use_potion():
 
 
 def pickup_lineage1():
+    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
+    with open(data_path, encoding="utf-8") as f:
+        data = json.load(f)
+    x, y = tuple(data[_mouse_key])
     force_set_foreground_window(lineage1_hwnd)
-    x, y = lineage1_mouse_x_y
     win32api.SetCursorPos((x, y))
     time.sleep(0.3)
     shake_mouse_small(5, 10)

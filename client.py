@@ -110,8 +110,7 @@ def _connect_loop():
 
 
 if __name__ == "__main__":
-    macro.init_lineage_windows("client")
-    macro.init_mouse_x_y()
+    macro.init_setting("client")
 
     print("명령어: 1=연결 시작, 2=연결 중지, q=종료")
     while True:

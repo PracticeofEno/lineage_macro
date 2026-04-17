@@ -404,10 +404,13 @@ if __name__ == "__main__":
             server_sock.close()
             break
         if cmd == "1":
-            macro.force_set_foreground_window(macro.lineage1_hwnd)
-            running = True
-            exchange_thread = threading.Thread(target=exchange_loop, daemon=True)
-            exchange_thread.start()
+            if exchange_thread and exchange_thread.is_alive():
+                print("[server] exchange 이미 실행 중")
+            else:
+                macro.force_set_foreground_window(macro.lineage1_hwnd)
+                running = True
+                exchange_thread = threading.Thread(target=exchange_loop, daemon=True)
+                exchange_thread.start()
         if cmd == "2":
             running = False
         if cmd == "3":

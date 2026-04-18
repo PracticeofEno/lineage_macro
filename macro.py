@@ -169,9 +169,9 @@ def arduino_mouse_click_right(x: int, y: int):
 def arduino_mouse_shift_click_left(x: int, y: int):
     win32api.SetCursorPos((x, y))
     _arduino_send(f'KD,{win32con.VK_SHIFT}')
-    time.sleep(0.05)
+    time.sleep(0.5)
     _arduino_send('CL')
-    time.sleep(0.05)
+    time.sleep(0.5)
     _arduino_send(f'KU,{win32con.VK_SHIFT}')
 
 

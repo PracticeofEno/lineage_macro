@@ -620,11 +620,18 @@ def pickup_lineage1(target_nickname: str | None = None):
     win32api.SetCursorPos((x, y))
     time.sleep(0.1)
 
+    img = screenshot(hwnd=lineage1_hwnd)
+    input_text = readInputText(img)
+    if target_nickname is None:
+        print(f"[macro] 현재 타겟 확인: '{input_text}' (target_nickname=None)")
+        target_locked = False
+
     if target_nickname is not None:
         img = screenshot(hwnd=lineage1_hwnd)
         input_text = readInputText(img)
         print(f"[macro] 현재 타겟 확인: '{input_text}' == '{target_nickname}'?")
         target_locked = input_text == target_nickname
+        print(f"{target_locked}")
 
     if not target_locked:
         for attempt in range(4):

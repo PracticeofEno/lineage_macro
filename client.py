@@ -71,11 +71,6 @@ def _handle_command(msg: dict) -> dict | None:
         macro.use_potion()
         return {"status": "ok"}
 
-    if cmd == "reset_target":
-        macro.target_locked = False
-        print("[client] 타겟 리셋")
-        return None
-
     print(f"[client] 알 수 없는 명령: {msg}")
     return None
 

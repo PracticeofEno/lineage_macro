@@ -140,14 +140,6 @@ def _accept_loop(server_sock: socket.socket):
 
 
 # ── 픽업 명령 전송 ─────────────────────────────────────────────────────────────
-def _broadcast_reset_target():
-    with _clients_lock:
-        snapshot = [c for c in _clients if "conn" in c]
-    for c in snapshot:
-        with c["lock"]:
-            _send_json(c["conn"], {"cmd": "reset_target"})
-
-
 def _send_pickup(client: dict, nickname: str | None = None) -> bool:
     """특정 클라이언트에게 pickup 명령을 보내고 ack를 기다린다."""
     conn = client["conn"]
@@ -200,8 +192,6 @@ def exchange_loop():
             if stage == WAIT_NICKNAME and prev_stage is not None and prev_stage >= READ_ADENA:
                 macro.key_press(win32con.VK_TAB)
                 time.sleep(0.3)
-                macro.target_locked = False
-                _broadcast_reset_target()
             prev_stage = stage
 
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────

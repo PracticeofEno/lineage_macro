@@ -22,7 +22,6 @@ PORT = 9999
 ACK_TIMEOUT = 10      # 픽업 ack 대기 최대 시간(초)
 SAME_UNIT_DELAY = 1   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
 POTION_COOLDOWN = 600 # 포션 쿨타임(초)
-
 # ── 클라이언트 관리 ───────────────────────────────────────────────────────────
 # client: {"conn": socket, "addr": tuple, "lock": Lock, "mp": int, "idx": int}
 # idx  : 클라이언트 실행 시 인자로 지정 (0=서버와 같은 PC, 같은 PC끼리 동일 idx 사용)
@@ -57,7 +56,7 @@ def _recv_json(conn: socket.socket) -> dict | None:
 
 
 def _try_use_potion(client: dict) -> bool:
-    if client["available"] >= 2:
+    if client["available"] > 3:
         return False
     now = time.time()
     if now - client["potion_last_used"] < POTION_COOLDOWN:
@@ -250,13 +249,10 @@ def exchange_loop():
                     macro._DIRECTION_FUNCS[macro.high_count_direction]()
                     time.sleep(1)
 
-            if time.time() - _last_type_string_time >= 12:
+            if time.time() - _last_type_string_time >= 5:
                 _ad_formats = [
-                    f"\\f2 헤이 {macro.adena_per_pickup} \\f={total_count}방!",
-                    f"\\f2 {total_count}방 가능 \\f=한방에 {macro.adena_per_pickup}아데나!",
-                    f"\\f2 헤이 200 \\f= 6방 1200",
-                    f"\\f2 {total_count}방 팝니다~ {macro.adena_per_pickup}",
-                    f"\\f2 {macro.adena_per_pickup}에 {total_count}방 ㄱㄱ",
+                    # f"",
+                    f"\\f21방 \\f={macro.adena_per_pickup}원 \\f26방 \\f={macro.adena_per_pickup * 6}원",
                 ]
                 macro.arduino_type_string(random.choice(_ad_formats))
                 _last_type_string_time = time.time()
@@ -264,7 +260,7 @@ def exchange_loop():
             nickname = macro.readExchangeNickname(img=img)
             if nickname:
                 greeted_nickname = nickname
-                # macro.arduino_type_string(f"최대 {total_count}방 입니다! 확인!")
+                macro.arduino_type_string(f"\\f2{greeted_nickname}\\f7님 어서오세요!")
                 stage = READ_ADENA
                 continue
 
@@ -369,7 +365,7 @@ def exchange_loop():
             time.sleep(0.1)
             if received > 0:
                 display_name = greeted_nickname[:2] if len(greeted_nickname) > 2 else greeted_nickname
-                macro.arduino_type_string(f"{display_name}님 감사합니당~!")
+                macro.arduino_type_string(f"\\f2{greeted_nickname}\\f7님 감사합니다!")
 
             stage = WAIT_NICKNAME
             greeted_nickname = None

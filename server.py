@@ -22,6 +22,7 @@ PORT = 9999
 ACK_TIMEOUT = 10      # 픽업 ack 대기 최대 시간(초)
 SAME_UNIT_DELAY = 1   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
 POTION_COOLDOWN = 600 # 포션 쿨타임(초)
+
 # ── 클라이언트 관리 ───────────────────────────────────────────────────────────
 # client: {"conn": socket, "addr": tuple, "lock": Lock, "mp": int, "idx": int}
 # idx  : 클라이언트 실행 시 인자로 지정 (0=서버와 같은 PC, 같은 PC끼리 동일 idx 사용)
@@ -56,7 +57,7 @@ def _recv_json(conn: socket.socket) -> dict | None:
 
 
 def _try_use_potion(client: dict) -> bool:
-    if client["available"] > 3:
+    if client["available"] >= 2:
         return False
     now = time.time()
     if now - client["potion_last_used"] < POTION_COOLDOWN:
@@ -69,15 +70,16 @@ def _try_use_potion(client: dict) -> bool:
 
     conn = client["conn"]
     addr = client["addr"]
-    print(f"[server] 포션 전송 → {addr}")
-    if _send_json(conn, {"cmd": "potion"}):
-        conn.settimeout(ACK_TIMEOUT)
-        ack = _recv_json(conn)
-        conn.settimeout(None)
-        if ack and ack.get("status") == "ok":
-            client["potion_last_used"] = now
-            print(f"[server] 포션 완료 ack 수신 from {addr}")
-            return True
+    with client["lock"]:
+        print(f"[server] 포션 전송 → {addr}")
+        if _send_json(conn, {"cmd": "potion"}):
+            conn.settimeout(ACK_TIMEOUT)
+            ack = _recv_json(conn)
+            conn.settimeout(None)
+            if ack and ack.get("status") == "ok":
+                client["potion_last_used"] = now
+                print(f"[server] 포션 완료 ack 수신 from {addr}")
+                return True
     return False
 
 
@@ -139,14 +141,6 @@ def _accept_loop(server_sock: socket.socket):
 
 
 # ── 픽업 명령 전송 ─────────────────────────────────────────────────────────────
-def _broadcast_reset_target():
-    with _clients_lock:
-        snapshot = [c for c in _clients if "conn" in c]
-    for c in snapshot:
-        with c["lock"]:
-            _send_json(c["conn"], {"cmd": "reset_target"})
-
-
 def _send_pickup(client: dict, nickname: str | None = None) -> bool:
     """특정 클라이언트에게 pickup 명령을 보내고 ack를 기다린다."""
     conn = client["conn"]
@@ -199,8 +193,6 @@ def exchange_loop():
             if stage == WAIT_NICKNAME and prev_stage is not None and prev_stage >= READ_ADENA:
                 macro.key_press(win32con.VK_TAB)
                 time.sleep(0.3)
-                macro.target_locked = False
-                _broadcast_reset_target()
             prev_stage = stage
 
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
@@ -251,7 +243,6 @@ def exchange_loop():
 
             if time.time() - _last_type_string_time >= 5:
                 _ad_formats = [
-                    # f"",
                     f"\\f21방 \\f={macro.adena_per_pickup}원 \\f26방 \\f={macro.adena_per_pickup * 6}원",
                 ]
                 macro.arduino_type_string(random.choice(_ad_formats))
@@ -364,7 +355,6 @@ def exchange_loop():
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
             time.sleep(0.1)
             if received > 0:
-                display_name = greeted_nickname[:2] if len(greeted_nickname) > 2 else greeted_nickname
                 macro.arduino_type_string(f"\\f2{greeted_nickname}\\f7님 감사합니다!")
 
             stage = WAIT_NICKNAME
@@ -400,10 +390,13 @@ if __name__ == "__main__":
             server_sock.close()
             break
         if cmd == "1":
-            macro.force_set_foreground_window(macro.lineage1_hwnd)
-            running = True
-            exchange_thread = threading.Thread(target=exchange_loop, daemon=True)
-            exchange_thread.start()
+            if exchange_thread and exchange_thread.is_alive():
+                print("[server] exchange 이미 실행 중")
+            else:
+                macro.force_set_foreground_window(macro.lineage1_hwnd)
+                running = True
+                exchange_thread = threading.Thread(target=exchange_loop, daemon=True)
+                exchange_thread.start()
         if cmd == "2":
             running = False
         if cmd == "3":

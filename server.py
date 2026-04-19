@@ -70,15 +70,16 @@ def _try_use_potion(client: dict) -> bool:
 
     conn = client["conn"]
     addr = client["addr"]
-    print(f"[server] 포션 전송 → {addr}")
-    if _send_json(conn, {"cmd": "potion"}):
-        conn.settimeout(ACK_TIMEOUT)
-        ack = _recv_json(conn)
-        conn.settimeout(None)
-        if ack and ack.get("status") == "ok":
-            client["potion_last_used"] = now
-            print(f"[server] 포션 완료 ack 수신 from {addr}")
-            return True
+    with client["lock"]:
+        print(f"[server] 포션 전송 → {addr}")
+        if _send_json(conn, {"cmd": "potion"}):
+            conn.settimeout(ACK_TIMEOUT)
+            ack = _recv_json(conn)
+            conn.settimeout(None)
+            if ack and ack.get("status") == "ok":
+                client["potion_last_used"] = now
+                print(f"[server] 포션 완료 ack 수신 from {addr}")
+                return True
     return False
 
 

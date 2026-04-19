@@ -404,23 +404,41 @@ def init_setting(role: str):
                 lineage1_hwnd = all_windows["client"]
                 new_title = "client"
             else:
-                if not candidates:
-                    raise RuntimeError("'Lineage Classic'으로 시작하는 윈도우를 찾을 수 없습니다.")
-                lineage1_hwnd = candidates[0]
-                win32gui.SetWindowText(lineage1_hwnd, "client")
-                new_title = "client"
+                existing_clients = [
+                    (title, hwnd)
+                    for title, hwnd in all_windows.items()
+                    if title == "client" or title.startswith("client")
+                ]
+                if existing_clients:
+                    existing_clients.sort(key=lambda item: item[0])
+                    new_title, lineage1_hwnd = existing_clients[0]
+                else:
+                    if not candidates:
+                        raise RuntimeError("'Lineage Classic'으로 시작하는 윈도우를 찾을 수 없습니다.")
+                    lineage1_hwnd = candidates[0]
+                    win32gui.SetWindowText(lineage1_hwnd, "client")
+                    new_title = "client"
         else:
             if not candidates:
-                raise RuntimeError("'Lineage Classic'으로 시작하는 윈도우를 찾을 수 없습니다.")
-            if "client" not in all_windows:
-                new_title = "client"
+                existing_clients = [
+                    (title, hwnd)
+                    for title, hwnd in all_windows.items()
+                    if title == "client" or title.startswith("client")
+                ]
+                if not existing_clients:
+                    raise RuntimeError("'Lineage Classic'으로 시작하는 윈도우를 찾을 수 없습니다.")
+                existing_clients.sort(key=lambda item: item[0])
+                new_title, lineage1_hwnd = existing_clients[0]
             else:
-                n = 2
-                while f"client{n}" in all_windows:
-                    n += 1
-                new_title = f"client{n}"
-            lineage1_hwnd = candidates[0]
-            win32gui.SetWindowText(lineage1_hwnd, new_title)
+                if "client" not in all_windows:
+                    new_title = "client"
+                else:
+                    n = 2
+                    while f"client{n}" in all_windows:
+                        n += 1
+                    new_title = f"client{n}"
+                lineage1_hwnd = candidates[0]
+                win32gui.SetWindowText(lineage1_hwnd, new_title)
 
     rect = win32gui.GetWindowRect(lineage1_hwnd)
     win32gui.MoveWindow(lineage1_hwnd, 0, 0, rect[2] - rect[0], rect[3] - rect[1], True)
@@ -476,7 +494,8 @@ def init_custom_hwnd(title: str, role: str = "client"):
             all_windows[win32gui.GetWindowText(hwnd)] = hwnd
     win32gui.EnumWindows(callback, None)
 
-    candidates = [hwnd for t, hwnd in all_windows.items() if t.startswith(title)]
+    exact_match = [hwnd for t, hwnd in all_windows.items() if t == title]
+    candidates = exact_match or [hwnd for t, hwnd in all_windows.items() if t.startswith(title)]
     if not candidates:
         raise RuntimeError(f"'{title}'으로 시작하는 윈도우를 찾을 수 없습니다.")
     lineage1_hwnd = candidates[0]

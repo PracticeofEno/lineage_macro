@@ -1,49 +1,65 @@
 """
 arduino_proxy.py - Arduino Serial Proxy
-  - COM5 를 단독 점유
+  - COM1 ~ COM32를 순차적으로 시도해 Arduino 시리얼 포트에 연결
   - 127.0.0.1:9998 에서 명령을 수신해 Arduino 에 전달하고 응답을 반환
   - server.py / client.py 보다 먼저 실행해야 한다
 """
 
 import socket
-import threading
-import serial
 import sys
+import threading
 
-SERIAL_PORT = 'COM7'
-BAUD_RATE   = 115200
-PROXY_HOST  = '127.0.0.1'
-PROXY_PORT  = 9998
+import serial
 
-# ── 시리얼 초기화 ─────────────────────────────────────────────────────────────
-try:
-    _ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-    print(f"[proxy] Arduino 연결됨: {SERIAL_PORT} @ {BAUD_RATE}")
-except serial.SerialException as e:
-    print(f"[proxy] 시리얼 포트 열기 실패: {e}")
+SERIAL_PORT_START = 1
+SERIAL_PORT_END = 32
+BAUD_RATE = 115200
+PROXY_HOST = "127.0.0.1"
+PROXY_PORT = 9998
+
+
+def _open_arduino_serial() -> tuple[serial.Serial, str]:
+    last_error = None
+
+    for port_num in range(SERIAL_PORT_START, SERIAL_PORT_END + 1):
+        port_name = f"COM{port_num}"
+        try:
+            ser = serial.Serial(port_name, BAUD_RATE, timeout=1)
+            print(f"[proxy] Arduino 연결됨: {port_name} @ {BAUD_RATE}")
+            return ser, port_name
+        except serial.SerialException as e:
+            last_error = e
+
+    print(
+        f"[proxy] COM{SERIAL_PORT_START}~COM{SERIAL_PORT_END}에서 Arduino 시리얼 포트를 찾지 못했습니다."
+    )
+    if last_error is not None:
+        print(f"[proxy] 마지막 오류: {last_error}")
     sys.exit(1)
 
+
+_ser, SERIAL_PORT = _open_arduino_serial()
 _ser_lock = threading.Lock()
 
 
 def _handle_client(conn: socket.socket, addr: tuple):
     print(f"[proxy] 클라이언트 연결: {addr}")
-    buf = b''
+    buf = b""
     try:
         while True:
             chunk = conn.recv(256)
             if not chunk:
                 break
             buf += chunk
-            while b'\n' in buf:
-                line, buf = buf.split(b'\n', 1)
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
                 cmd = line.decode().strip()
                 if not cmd:
                     continue
                 with _ser_lock:
-                    _ser.write((cmd + '\n').encode())
+                    _ser.write((cmd + "\n").encode())
                     resp = _ser.readline().decode().strip()
-                conn.sendall((resp + '\n').encode())
+                conn.sendall((resp + "\n").encode())
     except OSError:
         pass
     finally:
@@ -54,12 +70,11 @@ def _handle_client(conn: socket.socket, addr: tuple):
         print(f"[proxy] 클라이언트 종료: {addr}")
 
 
-# ── TCP 서버 ──────────────────────────────────────────────────────────────────
 srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 srv.bind((PROXY_HOST, PROXY_PORT))
 srv.listen(10)
-print(f"[proxy] 대기 중: {PROXY_HOST}:{PROXY_PORT}")
+print(f"[proxy] 대기 중 {PROXY_HOST}:{PROXY_PORT}")
 print("종료하려면 Ctrl+C")
 
 

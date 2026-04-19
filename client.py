@@ -1,4 +1,4 @@
-"""
+﻿"""
 client.py - Pickup 클라이언트
   - 서버에 TCP 연결 후 명령 수신
   - ping 수신 시 readMp()로 마나 측정 후 pong 응답
@@ -8,6 +8,8 @@ client.py - Pickup 클라이언트
 """
 
 import socket
+import os
+import atexit
 import json
 import time
 import threading
@@ -16,7 +18,7 @@ from datetime import datetime, timezone, timedelta
 
 import macro
 
-SERVER_HOST = '127.0.0.1'  # ← 서버 IP로 변경
+SERVER_HOST = '172.30.1.70'  # ← 서버 IP로 변경
 SERVER_PORT = 9999
 RECONNECT_DELAY = 5  # 재연결 대기 시간(초)
 
@@ -27,6 +29,87 @@ CLIENT_IDX = int(sys.argv[1])
 
 running = False
 _conn_thread = None
+_window_slot = None
+_window_slot_lock_fd = None
+
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
+
+
+def _slot_lock_path(slot_num: int) -> str:
+    return os.path.join(
+        _BASE_DIR,
+        f".client_slot_{CLIENT_IDX}_{slot_num}.lock",
+    )
+
+
+def _is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _acquire_window_slot() -> tuple[str, str]:
+    global _window_slot
+    global _window_slot_lock_fd
+
+    pid = os.getpid()
+    slot_num = 1
+
+    while True:
+        lock_path = _slot_lock_path(slot_num)
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(pid).encode())
+            _window_slot = slot_num
+            _window_slot_lock_fd = fd
+            window_title = "client" if slot_num == 1 else f"client{slot_num}"
+            window_role = "client" if slot_num == 1 else "client_numbering"
+            print(f"[client] 로컬 창 슬롯 할당: {window_title} (pc idx={CLIENT_IDX})")
+            return window_title, window_role
+        except FileExistsError:
+            try:
+                with open(lock_path, encoding="utf-8") as f:
+                    existing_pid = int(f.read().strip())
+            except (OSError, ValueError):
+                existing_pid = -1
+
+            if not _is_pid_alive(existing_pid):
+                try:
+                    os.remove(lock_path)
+                    continue
+                except OSError:
+                    pass
+
+            slot_num += 1
+
+
+def _release_window_slot() -> None:
+    global _window_slot
+    global _window_slot_lock_fd
+
+    if _window_slot is None:
+        return
+
+    if _window_slot_lock_fd is not None:
+        try:
+            os.close(_window_slot_lock_fd)
+        except OSError:
+            pass
+        _window_slot_lock_fd = None
+
+    try:
+        os.remove(_slot_lock_path(_window_slot))
+    except OSError:
+        pass
+
+    _window_slot = None
+
+
+atexit.register(_release_window_slot)
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -119,7 +202,8 @@ def _connect_loop():
 
 
 if __name__ == "__main__":
-    macro.init_setting("client")
+    window_title, window_role = _acquire_window_slot()
+    macro.init_custom_hwnd(window_title, window_role)
 
     print("명령어: 1=연결 시작, 2=연결 중지, q=종료")
     while True:
@@ -138,3 +222,4 @@ if __name__ == "__main__":
         elif cmd == "2":
             running = False
             print("[client] 연결 중지됨")
+

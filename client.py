@@ -18,9 +18,19 @@ from datetime import datetime, timezone, timedelta
 
 import macro
 
-SERVER_HOST = '172.30.1.70'  # ← 서버 IP로 변경
-SERVER_PORT = 9999
-RECONNECT_DELAY = 5  # 재연결 대기 시간(초)
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
+
+
+def _load_macro_config() -> dict:
+    config_path = os.path.join(_BASE_DIR, "macro_data.json")
+    with open(config_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+_macro_config = _load_macro_config()
+SERVER_HOST = _macro_config.get("server_host", "172.30.1.96")
+SERVER_PORT = int(_macro_config.get("server_port", 9999))
+RECONNECT_DELAY = int(_macro_config.get("reconnect_delay", 5))
 
 if len(sys.argv) < 2:
     print("사용법: python client.py <idx>  (예: python client.py 1)")
@@ -31,8 +41,6 @@ running = False
 _conn_thread = None
 _window_slot = None
 _window_slot_lock_fd = None
-
-_BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
 
 
 def _slot_lock_path(slot_num: int) -> str:

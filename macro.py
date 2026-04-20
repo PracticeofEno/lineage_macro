@@ -228,6 +228,18 @@ def arduino_backspace(n: int):
     _arduino_send(f'BS,{n}')
 
 
+def arduino_alt_tab(n: int = 1):
+    """Alt+Tab으로 창 전환한다. n: Tab 횟수 (여러 번으로 원하는 창까지 이동)"""
+    _arduino_send(f'KD,{win32con.VK_MENU}')
+    _sleep(0.20)  # switcher 뜨는 걸 눈으로 확인하는 반응 시간
+    for i in range(n):
+        _arduino_send(f'KP,{win32con.VK_TAB}')
+        if i < n - 1:
+            _sleep(0.28)  # 다음 창으로 넘길 때 잠깐 멈추는 습관
+    _sleep(0.15)  # 원하는 창 확인 후 Alt를 뗌
+    _arduino_send(f'KU,{win32con.VK_MENU}')
+
+
 _SHIFT_CHAR_MAP = {
     '!': '1', '@': '2', '#': '3', '$': '4', '%': '5',
     '^': '6', '&': '7', '*': '8', '(': '9', ')': '0',

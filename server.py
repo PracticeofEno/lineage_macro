@@ -188,13 +188,6 @@ def exchange_loop():
     prev_stage = None
 
     while running:
-        # 이전 stage가 READ_ADENA 이상이었을 경우 WAIT_NICKNAME 복귀 시 TAB + 타겟 리셋
-        if stage != prev_stage:
-            if stage == WAIT_NICKNAME and prev_stage is not None and prev_stage >= READ_ADENA:
-                macro.key_press(win32con.VK_TAB)
-                time.sleep(0.3)
-            prev_stage = stage
-
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
             img = macro.screenshot(hwnd=macro.lineage1_hwnd)

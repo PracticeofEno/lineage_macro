@@ -18,6 +18,11 @@ DIRECTIONS = (
     "northwest",
 )
 
+DIRECTION_NUMBERS = {
+    str(idx): direction
+    for idx, direction in enumerate(DIRECTIONS, start=1)
+}
+
 
 def _config_key(direction: str) -> str:
     return f"turn_{direction}_xy"
@@ -27,8 +32,9 @@ def _normalize_direction(value: str) -> str:
     direction = value.strip().lower()
     if direction.startswith("turn_") and direction.endswith("_xy"):
         direction = direction[5:-3]
+    direction = DIRECTION_NUMBERS.get(direction, direction)
     if direction not in DIRECTIONS:
-        choices = ", ".join(DIRECTIONS)
+        choices = ", ".join(f"{idx}={name}" for idx, name in DIRECTION_NUMBERS.items())
         raise RuntimeError(f"unknown direction: {value} (choose from: {choices})")
     return direction
 
@@ -58,9 +64,9 @@ def _read_turn_positions(path: str) -> dict[str, list[int]]:
 def show_turn_positions(path: str) -> None:
     positions = _read_turn_positions(path)
     print(f"[turn] config={path}")
-    for direction in DIRECTIONS:
+    for idx, direction in enumerate(DIRECTIONS, start=1):
         x, y = positions[direction]
-        print(f"[turn] {direction:<10} {x} {y}")
+        print(f"[turn] {idx} {direction:<10} {x} {y}")
 
 
 def _parse_updates(parts: list[str]) -> list[tuple[str, int, int]]:
@@ -88,6 +94,8 @@ def set_turn_positions(path: str, updates: list[tuple[str, int, int]]) -> None:
 def print_help() -> None:
     print("Commands")
     print("  show")
+    print("  1 <x> <y>")
+    print("  1 <x> <y> 2 <x> <y> ...")
     print("  north <x> <y>")
     print("  north <x> <y> northeast <x> <y> ...")
     print("  northeast <x> <y>")
@@ -97,6 +105,7 @@ def print_help() -> None:
     print("  southwest <x> <y>")
     print("  west <x> <y>")
     print("  northwest <x> <y>")
+    print("  1=north 2=northeast 3=east 4=southeast 5=south 6=southwest 7=west 8=northwest")
     print("  quit")
 
 
@@ -147,7 +156,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "pairs",
         nargs="*",
-        help="Direction coordinate triplets, for example 'north 654 292'.",
+        help="Direction coordinate triplets, for example '1 654 292' or 'north 654 292'.",
     )
     return parser.parse_args()
 

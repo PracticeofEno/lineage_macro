@@ -1,4 +1,4 @@
-"""
+﻿"""
 server.py - Exchange 서버
   - TCP 소켓으로 클라이언트 연결 관리
   - ping-pong 시 각 client MP를 수신하여 개별 저장
@@ -57,7 +57,7 @@ def _recv_json(conn: socket.socket) -> dict | None:
 
 
 def _try_use_potion(client: dict) -> bool:
-    if client["available"] >= 2:
+    if client["available"] > 2:
         return False
     now = time.time()
     if now - client["potion_last_used"] < POTION_COOLDOWN:

@@ -100,7 +100,7 @@ def _read_exchange_nickname_img(screenshot: Image.Image, y: int = 292) -> str:
         x -= 5
     return best
 
-def _read_exchange_number(image: Image.Image, x: int, y: int) -> str:
+def read_itemslot_number(image: Image.Image, x: int, y: int) -> str:
     color = (0xbe, 0xbe, 0xbe)
     result = []
     img_width = image.width
@@ -121,11 +121,17 @@ def read_exchange_adena(img=None) -> str:
     if img is None:
         img = screenshot()
     if _exchange_nickname_xy is None:
+        print("이건 발생할 수 없음! 발생한다면 뭬쳐따리~")
         return ''
     x = 132
     y = _exchange_nickname_xy[1] + 111
     cropped = crop(img, x, y, 200, 21)
-    return _read_exchange_number(cropped, 0, 0)
+    number_string = read_itemslot_number(cropped, 0, 0)
+    digits = number_string.replace(',', '')
+    try:
+        return int(digits)
+    except (ValueError, TypeError):
+        return 0
 
 
 lineage1_hwnd = None
@@ -845,9 +851,13 @@ def read_my_adena(img=None) -> int:
         raise RuntimeError("my_adena_x_y가 설정되지 않았습니다. find_adena_x_y()를 먼저 호출하세요.")
     if img is None:
         img = screenshot()
+    if my_adena_x_y is None:
+        find_adena_x_y(img)
     x, y = my_adena_x_y
+    arduino_mouse_move_to(x -52, y -47)
+    _sleep(0.1)
     cropped = crop(img, x, y, 300, 21)
-    text = _read_exchange_number(cropped, 0, 0)
+    text = read_itemslot_number(cropped, 0, 0)
     digits = ''.join(c for c in text if c.isdigit())
     return int(digits) if digits else 0
 

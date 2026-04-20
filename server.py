@@ -125,7 +125,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
                     client["mp"] = resp.get("mp", 0)
                     client["available"] = int(client["mp"] // 20)
                     # print(f"[server] client {addr} MP: {client['mp']}  available: {client['available']}")
-            time.sleep(2)
+            macro._sleep(2)
     finally:
         _remove_client(client)
 
@@ -174,7 +174,7 @@ def _send_pickup(client: dict, nickname: str | None = None) -> bool:
 def exchange_loop():
     global running
 
-    WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(4)
+    WAIT_EXCHANGE_REQUEST, WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(5)
     stage = WAIT_NICKNAME
 
     greeted_nickname = None
@@ -185,11 +185,20 @@ def exchange_loop():
     _last_status_print_time = 0
     _last_potion_idx_time: dict = {}
     clients_snapshot = []
+    _nickname_fail_count = 0
+    _need_read_own_adena = False
+    _read_adena_moved = False
     prev_stage = None
 
     while running:
-        # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
-        if stage == WAIT_NICKNAME:
+        # 교환 대기 및 잡무
+        if stage == WAIT_EXCHANGE_REQUEST:
+            if _need_read_own_adena:
+                _need_read_own_adena = False
+                # my_adena_x_y가 있어야 함 
+                own_adena = macro.read_my_adena()
+                print(f"[server] 내 아데나: {own_adena}")
+
             img = macro.screenshot(hwnd=macro.lineage1_hwnd)
             _mp1 = macro.readMp(img)
             if _mp1 != 0:
@@ -210,9 +219,8 @@ def exchange_loop():
                 if _try_use_potion(e):
                     _last_potion_idx_time[e["idx"]] = time.time()
                     if e["idx"] == 0 and "conn" in e:
-                        time.sleep(0.5)
+                        time._sleep(0.5)
                         macro.force_set_foreground_window(macro.lineage1_hwnd)
-
             total_count = sum(e["available"] for e in clients_snapshot)
             if time.time() - _last_status_print_time >= 3:
                 for e in clients_snapshot:
@@ -224,74 +232,75 @@ def exchange_loop():
                 if macro.current_direction != macro.low_count_direction:
                     macro.force_set_foreground_window(macro.lineage1_hwnd)
                     macro._DIRECTION_FUNCS[macro.low_count_direction]()
-                    time.sleep(1)
-                time.sleep(0.5)
+                    macro._sleep(1)
+                macro._sleep(0.5)
                 continue
             else:
                 if macro.current_direction != macro.high_count_direction:
                     macro.force_set_foreground_window(macro.lineage1_hwnd)
-                    time.sleep(1)
+                    macro._sleep(1)
                     macro._DIRECTION_FUNCS[macro.high_count_direction]()
-                    time.sleep(1)
+                    macro._sleep(1)
 
-            if time.time() - _last_type_string_time >= 8:
-                _ad_formats = [
-                    f"\\f2헤이 {macro.adena_per_pickup} \\f={total_count}방 !",
-                    f"\\f2{total_count}방 가능 \\f=한방에 {macro.adena_per_pickup}아데나!",
-                    f"\\f2헤이 {macro.adena_per_pickup} \\f= 6방 {macro.adena_per_pickup * 6}",
-                    f"\\f2{macro.adena_per_pickup}에 {total_count}방 ㄱㄱ",
-                ]
-                macro.arduino_type_string(random.choice(_ad_formats))
-                _last_type_string_time = time.time()
+            if macro.check_exchange_request(img):
+                macro.arduino_mouse_move_to(870,914)
+                macro.mouse_click_left()
+                stage = WAIT_NICKNAME
+                macro._sleep(0.5)
+                continue
 
+            # if time.time() - _last_type_string_time >= 8:
+            #     _ad_formats = [
+            #         f"\\f2헤이 {macro.adena_per_pickup} \\f={total_count}방 !",
+            #         f"\\f2{total_count}방 가능 \\f=한방에 {macro.adena_per_pickup}아데나!",
+            #         f"\\f2헤이 {macro.adena_per_pickup} \\f= 6방 {macro.adena_per_pickup * 6}",
+            #         f"\\f2{macro.adena_per_pickup}에 {total_count}방 ㄱㄱ",
+            #     ]
+            #     macro.arduino_type_string(random.choice(_ad_formats))
+            #     _last_type_string_time = time.time()
+            time.sleep(0.5)
+        # ── Stage 1: 닉네임 감지(교환창 떳는지) ──────────────
+        elif stage == WAIT_NICKNAME:
+            img = macro.screenshot(hwnd=macro.lineage1_hwnd)
             nickname = macro.readExchangeNickname(img=img)
             if nickname:
                 greeted_nickname = nickname
+                _nickname_fail_count = 0
+                _read_adena_moved = False
                 # macro.arduino_type_string(f"최대 {total_count}방 입니다! 확인!")
                 stage = READ_ADENA
                 continue
-
-            macro._arduino_send(f'KP,{win32con.VK_F7}')
+            else:
+                _nickname_fail_count += 1
+                if _nickname_fail_count >= 6:
+                    print(f"[server] 닉네임 읽기 {_nickname_fail_count}회 연속 실패 → WAIT_EXCHANGE_REQUEST로 복귀")
+                    _nickname_fail_count = 0
+                    stage = WAIT_EXCHANGE_REQUEST
             time.sleep(0.5)
-
-        # ── Stage 2: 교환 전 아데나 1회 측정 ────────────────────────────────
+        # ── Stage 2: 교환창이 유지되고있고(닉네임이 읽어지고있고) adena 읽는걸 기다림 ────────────
         elif stage == READ_ADENA:
-            if not macro.readExchangeNickname(img):
-                stage = WAIT_NICKNAME
+            img = macro.screenshot(hwnd=macro.lineage1_hwnd)
+            nickname = macro.readExchangeNickname(img=img)
+            if not nickname:
+                print("[server] 닉네임 사라짐 감지 → WAIT_EXCHANGE_REQUEST 복귀")
+                stage = WAIT_EXCHANGE_REQUEST
+                greeted_nickname = None
+                _read_adena_moved = False
                 continue
-            adena_before = macro.readAdena()
-            macro._arduino_send(f'KP,{win32con.VK_F7}')
-            stage = MONITOR_BRIGHTNESS
-
-        # ── Stage 3: 슬롯 밝기 감시 → 변화 시 교환 수락 ────────────────────
-        elif stage == MONITOR_BRIGHTNESS:
-            img = macro.screenshot()
-            if not macro.readExchangeNickname(img):
-                stage = PICKUP
-                continue
-
-            slot = macro.crop(img, 258, 677, 30, 30)
-            brightness = macro.get_brightness(slot)
-            print(f"[server] 슬롯 밝기: {brightness:.2f}")
-
-            if prev_brightness is not None and brightness != prev_brightness:
-                brightness_changed = True
+            if not _read_adena_moved:
+                macro.arduino_mouse_move_to(75, 559)
+                _read_adena_moved = True
+            exchange_adena = macro.read_exchange_adena(img=img)
+            if exchange_adena != 0:
                 macro.acceptExchange()
-            prev_brightness = brightness
-            time.sleep(0.5)
-
+                macro._sleep(0.5)
+                stage = PICKUP
         # ── Stage 4: 받은 아데나 계산 → 서버/클라이언트 픽업 분배 ──────────
         elif stage == PICKUP:
-            if not brightness_changed:
-                stage = WAIT_NICKNAME
-                greeted_nickname = None
-                adena_before = None
-                prev_brightness = None
-                brightness_changed = False
-                continue
-            adena_after = macro.readAdena()
-            print(f"[server] 아데나 변화 감지: {adena_before} → {adena_after}")
-            received = adena_after - adena_before
+            img = macro.screenshot(hwnd=macro.lineage1_hwnd)
+            adena_after = macro.read_my_adena(img=img)
+            print(f"[server] 아데나 변화 감지: {own_adena} → {adena_after}")
+            received = adena_after - own_adena
             pickup_count = int(received // macro.adena_per_pickup)
 
             # 핑 스레드의 concurrent 업데이트와 격리하기 위해 available을 별도 dict로 복사
@@ -326,7 +335,7 @@ def exchange_loop():
                         break
                     elapsed = time.time() - last_idx_time.get(c["idx"], 0)
                     if elapsed < SAME_UNIT_DELAY:
-                        time.sleep(SAME_UNIT_DELAY - elapsed)
+                        macro._sleep(SAME_UNIT_DELAY - elapsed)
 
                     if "conn" not in c:
                         print(f"[서버 픽업 실행] - (남은 픽업: {remaining})")
@@ -349,16 +358,14 @@ def exchange_loop():
 
             if win32gui.GetForegroundWindow() != macro.lineage1_hwnd:
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
-            time.sleep(0.1)
+            macro._sleep(0.1)
             if received > 0:
                 display_name = greeted_nickname[:2] if len(greeted_nickname) > 2 else greeted_nickname
                 macro.arduino_type_string(f"{display_name}님 감사합니당~!")
 
-            stage = WAIT_NICKNAME
+            stage = WAIT_EXCHANGE_REQUEST
             greeted_nickname = None
-            adena_before = None
-            prev_brightness = None
-            brightness_changed = False
+            own_adena = None
 
 
 # ── 진입점 ────────────────────────────────────────────────────────────────────
@@ -397,7 +404,7 @@ if __name__ == "__main__":
                 exchange_thread.start()
         if cmd == "2":
             running = False
-            time.sleep(3)
+            macro._sleep(3)
             img = macro.screenshot(hwnd=macro.lineage1_hwnd)
             filename = f"stop_{time.strftime('%Y%m%d_%H%M%S')}.png"
             img.save(filename)

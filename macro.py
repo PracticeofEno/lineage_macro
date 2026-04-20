@@ -2,6 +2,7 @@ from itertools import count
 import os
 import sys
 import json
+import random
 import win32api
 import win32com
 import win32con
@@ -12,9 +13,16 @@ import time
 import socket as _socket
 import threading as _threading
 import numpy as np
+import ctypes
 from ctypes import windll
 from datetime import datetime
 from PIL import Image
+
+
+def _sleep(base: float, jitter: float = 0.2):
+    """base 시간에 ±jitter 비율의 랜덤 편차를 더해 sleep한다."""
+    duration = base * (1.0 + random.uniform(-jitter, jitter))
+    time.sleep(max(0.0, duration))
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -25,9 +33,17 @@ _CONVERTED_DATA_PATH = os.path.join(_BASE, "converted_data.json")
 with open(_CONVERTED_DATA_PATH, encoding="utf-8") as _f:
     _converted_map: dict[str, str] = json.load(_f)
 
+_CONVERTED_EXCHANGE_DATA_PATH = os.path.join(_BASE, "converted_exchange_data.json")
+with open(_CONVERTED_EXCHANGE_DATA_PATH, encoding="utf-8") as _f:
+    _converted_exchange_map: dict[str, str] = {v: k for k, v in json.load(_f).items()}
+
 
 def lookup(coord_string: str) -> str | None:
     return _converted_map.get(coord_string)
+
+
+def lookup_exchange(coord_string: str) -> str | None:
+    return _converted_exchange_map.get(coord_string)
 
 
 def image_to_coord_string(image: Image.Image, color: tuple) -> str:
@@ -83,6 +99,35 @@ def _read_exchange_nickname_img(screenshot: Image.Image, y: int = 292) -> str:
             best = text
         x -= 5
     return best
+
+def _read_exchange_number(image: Image.Image, x: int, y: int) -> str:
+    color = (0xbe, 0xbe, 0xbe)
+    result = []
+    img_width = image.width
+    while x < img_width:
+        if x + 10 > img_width:
+            break
+        s = image_to_coord_string(crop(image, x, y, 10, 21), color)
+        matched = lookup_exchange(s)
+        if matched is None:
+            break
+        result.append(matched)
+        x += 10
+    return ''.join(result)
+
+
+def read_exchange_adena(img=None) -> str:
+    global _exchange_nickname_xy
+    if img is None:
+        img = screenshot()
+    if _exchange_nickname_xy is None:
+        return ''
+    x = 132
+    y = _exchange_nickname_xy[1] + 111
+    cropped = crop(img, x, y, 200, 21)
+    cropped.save("exchange_adena_cropped.png")
+    return _read_exchange_number(cropped, 0, 0)
+
 
 lineage1_hwnd = None
 
@@ -151,36 +196,32 @@ def arduino_key_press(vk: int, duration: float = 0.05):
     """duration 이 필요 없는 경우 Arduino 내부에서 30 ms 딜레이를 처리한다."""
     _arduino_send(f'KP,{vk}')
     if duration > 0.05:
-        time.sleep(duration - 0.05)
+        _sleep(duration - 0.05)
 
 
-def arduino_mouse_move(x: int, y: int):
-    _arduino_send(f'MM,{x},{y}')
-
-
-def arduino_mouse_click_left(x: int, y: int):
+def arduino_mouse_click_left():
     _arduino_send('CL')
 
 
-def arduino_mouse_click_right(x: int, y: int):
+def arduino_mouse_click_right():
     _arduino_send('CR')
 
 
 def arduino_mouse_shift_click_left(x: int, y: int):
-    win32api.SetCursorPos((x, y))
+    arduino_mouse_move_to(x, y)
     _arduino_send(f'KD,{win32con.VK_SHIFT}')
-    time.sleep(0.5)
-    _arduino_send('CL')
-    time.sleep(0.5)
+    _sleep(0.5)
+    arduino_mouse_click_left()
+    _sleep(0.5)
     _arduino_send(f'KU,{win32con.VK_SHIFT}')
 
 
 def arduino_mouse_shift_click_right(x: int, y: int):
-    win32api.SetCursorPos((x, y))
+    arduino_mouse_move_to(x, y)
     _arduino_send(f'KD,{win32con.VK_SHIFT}')
-    time.sleep(0.05)
-    _arduino_send('CR')
-    time.sleep(0.05)
+    _sleep(0.05)
+    arduino_mouse_click_right()
+    _sleep(0.05)
     _arduino_send(f'KU,{win32con.VK_SHIFT}')
 
 
@@ -321,10 +362,6 @@ def turn_northwest():
     current_direction = 'northwest'
 
 
-def arduino_init_cursor():
-    """커서를 화면 (0, 0) 으로 초기화한다. 프로그램 시작 시 한 번 호출 권장."""
-    _arduino_send('INIT')
-
 _mouse_key: str | None = None
 current_direction = 'north'
 available_count_1 = 0
@@ -368,74 +405,28 @@ def get_hwnd() -> int:
 def init_setting(role: str):
     """
     role: "server" 또는 "client"
-    1. "Lineage Classic"으로 시작하는 윈도우를 찾아 타이틀 설정 및 lineage1_hwnd 지정
-    2. macro_data.json에서 설정 로드:
-       - direction 설정은 공통 적용
-       - mouse x,y는 타이틀에 따라 server/client/client_numbering 키 사용
+    1. "Lineage Classic"으로 시작하는 윈도우를 찾아 lineage1_hwnd 지정 후 (0,0)으로 이동
+    2. macro_data.json에서 설정 로드
     """
     global lineage1_hwnd
     global _mouse_key
     global direction_threshold, adena_per_pickup, current_direction, low_count_direction, high_count_direction
     global _TURN_XY
 
-    # ── 윈도우 탐색 및 타이틀 설정 ────────────────────────────────────────────
-    all_windows: dict[str, int] = {}
-    def callback(hwnd, _):
-        if win32gui.IsWindowVisible(hwnd):
-            all_windows[win32gui.GetWindowText(hwnd)] = hwnd
-    win32gui.EnumWindows(callback, None)
-
-    if role == "server":
-        if "server" in all_windows:
-            lineage1_hwnd = all_windows["server"]
-            new_title = "server"
-        else:
-            candidates = [hwnd for title, hwnd in all_windows.items() if title.startswith("Lineage Classic")]
-            if not candidates:
-                raise RuntimeError("'Lineage Classic'으로 시작하는 윈도우를 찾을 수 없습니다.")
-            lineage1_hwnd = candidates[0]
-            win32gui.SetWindowText(lineage1_hwnd, "server")
-            new_title = "server"
-    else:
-        candidates = [hwnd for title, hwnd in all_windows.items() if title.startswith("Lineage Classic")]
-        if "server" in all_windows:
-            if "client" in all_windows:
-                lineage1_hwnd = all_windows["client"]
-                new_title = "client"
-            else:
-                if not candidates:
-                    raise RuntimeError("'Lineage Classic'으로 시작하는 윈도우를 찾을 수 없습니다.")
-                lineage1_hwnd = candidates[0]
-                win32gui.SetWindowText(lineage1_hwnd, "client")
-                new_title = "client"
-        else:
-            if not candidates:
-                raise RuntimeError("'Lineage Classic'으로 시작하는 윈도우를 찾을 수 없습니다.")
-            if "client" not in all_windows:
-                new_title = "client"
-            else:
-                n = 2
-                while f"client{n}" in all_windows:
-                    n += 1
-                new_title = f"client{n}"
-            lineage1_hwnd = candidates[0]
-            win32gui.SetWindowText(lineage1_hwnd, new_title)
-
+    lineage1_hwnd = _find_lineage_hwnd()
     rect = win32gui.GetWindowRect(lineage1_hwnd)
     win32gui.MoveWindow(lineage1_hwnd, 0, 0, rect[2] - rect[0], rect[3] - rect[1], True)
-    print(f"[macro] lineage1_hwnd={lineage1_hwnd} → 타이틀 '{new_title}', 위치 (0, 0)")
+    print(f"[macro] lineage1_hwnd={lineage1_hwnd} → 위치 (0, 0)")
 
-    # ── JSON 설정 로드 ─────────────────────────────────────────────────────────
     data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
     with open(data_path, encoding="utf-8") as f:
         data = json.load(f)
 
-    # 타이틀에 따라 mouse x,y 키 결정
-    if new_title == "server":
+    if role == "server":
         mouse_key = "server_mouse_x_y"
-    elif new_title == "client":
+    elif role == "client":
         mouse_key = "client_mouse_x_y"
-    else:  # client2, client3, ...
+    else:
         mouse_key = "client_numbering_mouse_x_y"
 
     _mouse_key = mouse_key
@@ -569,13 +560,13 @@ def screenshot(filename: str = None, hwnd: int = None) -> Image.Image:
     return img
 
 
-def mouse_click_left(x: int, y: int):
-    arduino_mouse_click_left(x, y)
-    time.sleep(0.3)
+def mouse_click_left():
+    arduino_mouse_click_left()
+    _sleep(0.3)
 
 
-def mouse_click_right(x: int, y: int):
-    arduino_mouse_click_right(x, y)
+def mouse_click_right():
+    arduino_mouse_click_right()
 
 
 def _send_char(ch: str):
@@ -591,21 +582,123 @@ def force_set_foreground_window(hwnd: int):
         win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE
     windll.user32.keybd_event(0, 0, 0, 0)  # null 입력으로 포그라운드 권한 획득
     win32gui.SetForegroundWindow(hwnd)
-    time.sleep(0.05)
+    _sleep(0.05)
+
+def _get_cursor_pos() -> tuple[int, int]:
+    class _POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+    pt = _POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+    return (pt.x, pt.y)
+
+
+_hid_scale_x: float | None = None  # x축 픽셀/HID-unit 비율
+_hid_scale_y: float | None = None  # y축 픽셀/HID-unit 비율
+_CORRECTION_THRESHOLD = 2           # 이 픽셀 이하면 보정 생략
+_MAX_CORRECTIONS = 4                # 최대 보정 횟수
+
+_CALIBRATION_TARGETS = [
+    (500, 300), (1000, 500), (200, 700),
+    (800, 200), (600, 400), (500, 300),
+]
+
+
+def calibrate_hid_scale() -> None:
+    """HID scale을 학습시키기 위해 여러 좌표를 순서대로 이동한다."""
+    print("[macro] HID scale 보정 시작...")
+    for tx, ty in _CALIBRATION_TARGETS:
+        arduino_mouse_move_to(tx, ty)
+        time.sleep(0.1)
+    print(f"[macro] HID scale 보정 완료: sx={_hid_scale_x:.4f}  sy={_hid_scale_y:.4f}")
+
+
+def _wait_cursor_stop(timeout: float = 1.5, poll: float = 0.02, stable_needed: int = 5) -> None:
+    """커서가 멈출 때까지 대기"""
+    deadline = time.time() + timeout
+    prev = _get_cursor_pos()
+    stable = 0
+    while time.time() < deadline:
+        time.sleep(poll)
+        cur = _get_cursor_pos()
+        if abs(cur[0] - prev[0]) <= 1 and abs(cur[1] - prev[1]) <= 1:
+            stable += 1
+            if stable >= stable_needed:
+                return
+        else:
+            stable = 0
+            prev = cur
+
+
+def _update_hid_scale(hid_x: int, hid_y: int, moved_x: int, moved_y: int) -> None:
+    global _hid_scale_x, _hid_scale_y
+    if abs(hid_x) > 5 and abs(moved_x) > 0:
+        m = abs(moved_x) / abs(hid_x)
+        if 0.1 < m < 20.0:
+            _hid_scale_x = m if _hid_scale_x is None else _hid_scale_x * 0.65 + m * 0.35
+    if abs(hid_y) > 5 and abs(moved_y) > 0:
+        m = abs(moved_y) / abs(hid_y)
+        if 0.1 < m < 20.0:
+            _hid_scale_y = m if _hid_scale_y is None else _hid_scale_y * 0.65 + m * 0.35
+
 
 def arduino_mouse_move_rel(dx: int, dy: int):
-    return _arduino_send(f"RM,{dx},{dy}")
+    _arduino_send(f"RM,{dx},{dy}")
+
+
+def arduino_mouse_move_to(target_x: int, target_y: int):
+    """절대 좌표로 이동. x/y 독립 scale 학습 + 반복 오차 보정."""
+    cur_x, cur_y = _get_cursor_pos()
+    dx = target_x - cur_x
+    dy = target_y - cur_y
+    if dx == 0 and dy == 0:
+        return
+
+    sx = _hid_scale_x or 1.0
+    sy = _hid_scale_y or 1.0
+    hid_dx = int(round(dx / sx))
+    hid_dy = int(round(dy / sy))
+    if hid_dx == 0 and hid_dy == 0:
+        return
+
+    _arduino_send(f'RM,{hid_dx},{hid_dy}')
+    _wait_cursor_stop()
+
+    prev_x, prev_y = cur_x, cur_y
+    prev_hid_x, prev_hid_y = hid_dx, hid_dy
+
+    for _ in range(_MAX_CORRECTIONS):
+        actual_x, actual_y = _get_cursor_pos()
+        _update_hid_scale(prev_hid_x, prev_hid_y,
+                          actual_x - prev_x, actual_y - prev_y)
+
+        err_x = target_x - actual_x
+        err_y = target_y - actual_y
+        if abs(err_x) <= _CORRECTION_THRESHOLD and abs(err_y) <= _CORRECTION_THRESHOLD:
+            break
+
+        sx = _hid_scale_x or 1.0
+        sy = _hid_scale_y or 1.0
+        corr_x = int(round(err_x / sx))
+        corr_y = int(round(err_y / sy))
+        if corr_x == 0 and corr_y == 0:
+            break
+
+        _arduino_send(f'RM,{corr_x},{corr_y}')
+        _wait_cursor_stop()
+
+        prev_x, prev_y = actual_x, actual_y
+        prev_hid_x, prev_hid_y = corr_x, corr_y
 
 def shake_mouse_small(count=10, dist=10, delay=0.05):
     for _ in range(count):
-        arduino_mouse_move_rel(dist, 0) # 오른쪽으로 2
-        time.sleep(delay)
-        arduino_mouse_move_rel(-dist, 0) # 왼쪽으로 2
-        time.sleep(delay)
+        arduino_mouse_move_rel(dist, 0)
+        _sleep(delay)
+        arduino_mouse_move_rel(-dist, 0)
+        _sleep(delay)
 
 def use_potion():
     force_set_foreground_window(lineage1_hwnd)
-    time.sleep(0.5)
+    _sleep(0.5)
     _arduino_send(f'KP,{win32con.VK_F8}')
 
 
@@ -615,19 +708,19 @@ def pickup_lineage1(target_nickname: str | None = None):
         data = json.load(f)
     x, y = tuple(data[_mouse_key])
     force_set_foreground_window(lineage1_hwnd)
-    win32api.SetCursorPos((x, y))
-    time.sleep(0.1)
+    arduino_mouse_move_to(x, y)
+    _sleep(0.1)
 
     for attempt in range(4):
         arduino_mouse_shift_click_right(x, y)
-        time.sleep(0.1)
+        _sleep(0.1)
         img = screenshot(hwnd=lineage1_hwnd)
         input_text = readInputText(img)
         print(f"[macro] 타겟 확인 ({attempt+1}/4): '{input_text}' == '{target_nickname}'?")
         arduino_key_down(win32con.VK_CONTROL)
         arduino_key_press(win32con.VK_BACK)
         arduino_key_up(win32con.VK_CONTROL)
-        time.sleep(0.1)
+        _sleep(0.1)
         if input_text == target_nickname:
             print("[macro] 타겟 고정 성공")
             break
@@ -635,9 +728,9 @@ def pickup_lineage1(target_nickname: str | None = None):
         print("[macro] 타겟 고정 실패 - pickup 진행")
 
     key_press(win32con.VK_F5)
-    time.sleep(0.1)
-    mouse_click_left(x, y)
-    time.sleep(0.1)
+    _sleep(0.1)
+    mouse_click_left()
+    _sleep(0.1)
 
 
 
@@ -685,7 +778,7 @@ def readAdena() -> int:
             if value == 0:
                 continue
             return value
-        time.sleep(0.5)
+        _sleep(0.5)
 
 
 def readExchangeNickname(img=None):
@@ -702,14 +795,14 @@ def readExchangeNickname(img=None):
 
 
 def acceptExchange():
-    win32api.SetCursorPos((247, 752))
-    time.sleep(0.5)
-    _arduino_send('CL')
-    time.sleep(0.5)
+    arduino_mouse_move_to(247, 752)
+    _sleep(0.5)
+    arduino_mouse_click_left()
+    _sleep(0.5)
     arduino_key_press(ord('Y'))
-    time.sleep(0.1)
+    _sleep(0.1)
     _arduino_send(f'KP,{win32con.VK_RETURN}')
-    time.sleep(0.3)
+    _sleep(0.3)
 
 
 def findExchangeNicknameY(img=None) -> tuple[int, int] | None:
@@ -742,7 +835,7 @@ def monitor_chat():
         if text != prev:
             print(text)
             prev = text
-        time.sleep(0.5)
+        _sleep(0.5)
 
 
 _DIRECTION_FUNCS = {

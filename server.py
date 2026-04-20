@@ -371,6 +371,7 @@ def exchange_loop():
 # ── 진입점 ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     macro.init_setting("server")
+    macro.calibrate_hid_scale()
 
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -403,6 +404,11 @@ if __name__ == "__main__":
                 exchange_thread.start()
         if cmd == "2":
             running = False
+            time.sleep(3)
+            img = macro.screenshot(hwnd=macro.lineage1_hwnd)
+            filename = f"stop_{time.strftime('%Y%m%d_%H%M%S')}.png"
+            img.save(filename)
+            print(f"[server] 스크린샷 저장: {filename}")
         if cmd == "3":
             with _clients_lock:
                 target = next((c for c in _clients if c.get("idx") == 1 and "conn" in c), None)

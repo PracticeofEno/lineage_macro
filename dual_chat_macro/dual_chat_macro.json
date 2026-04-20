@@ -1,0 +1,27 @@
+{
+  "proxy_host": "127.0.0.1",
+  "proxy_port": 9998,
+  "starts_in_korean_mode": true,
+  "send_enter": true,
+  "cycle_interval_seconds": 2.0,
+  "switch_delay_seconds": 1.0,
+  "post_send_delay_seconds": 0.25,
+  "order": [
+    "server",
+    "client"
+  ],
+  "targets": {
+    "server": {
+      "window_title_prefix": "server",
+      "messages": [
+        "\\f21방 \\f=200원 \\f26방 \\f=1200원"
+      ]
+    },
+    "client": {
+      "window_title_prefix": "client",
+      "messages": [
+        "\\f21방 \\f=200원 \\f26방 \\f=1200원"
+      ]
+    }
+  }
+}

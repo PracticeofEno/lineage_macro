@@ -125,7 +125,6 @@ def read_exchange_adena(img=None) -> str:
     x = 132
     y = _exchange_nickname_xy[1] + 111
     cropped = crop(img, x, y, 200, 21)
-    cropped.save("exchange_adena_cropped.png")
     return _read_exchange_number(cropped, 0, 0)
 
 
@@ -734,6 +733,15 @@ def pickup_lineage1(target_nickname: str | None = None):
 
 
 
+def check_exchange_request(img=None) -> bool:
+    if img is None:
+        img = screenshot()
+    cropped = crop(img, 848 - 5, 877 - 5, 5, 5)
+    arr = np.array(cropped.convert("RGB"))
+    mask = (arr[:,:,0] == 0) & (arr[:,:,1] == 0) & (arr[:,:,2] == 0)
+    return int(mask.sum()) >= 7
+
+
 def checkExchangeRequest(img=None) -> bool:
     if img is None:
         img = screenshot()
@@ -820,6 +828,18 @@ def findExchangeNicknameY(img=None) -> tuple[int, int] | None:
     return None
 
 
+def read_my_adena(img=None) -> int:
+    if my_adena_x_y is None:
+        raise RuntimeError("my_adena_x_y가 설정되지 않았습니다. find_adena_x_y()를 먼저 호출하세요.")
+    if img is None:
+        img = screenshot()
+    x, y = my_adena_x_y
+    cropped = crop(img, x, y, 300, 21)
+    text = _read_exchange_number(cropped, 0, 0)
+    digits = ''.join(c for c in text if c.isdigit())
+    return int(digits) if digits else 0
+
+
 def readInputText(img=None) -> str:
     if img is None:
         img = screenshot()
@@ -844,4 +864,40 @@ _DIRECTION_FUNCS = {
     'south': turn_south, 'southwest': turn_southwest,
     'west': turn_west, 'northwest': turn_northwest,
 }
+
+
+my_adena_x_y: tuple[int, int] | None = None
+
+
+def find_adena_x_y(img=None, origin_x: int = 997, origin_y: int = 190,
+                   width: int = 50, height: int = 100,
+                   min_streak: int = 8) -> tuple[int, int] | None:
+    global my_adena_x_y
+    if img is None:
+        img = screenshot()
+    region = crop(img, origin_x, origin_y, width, height)
+    arr = np.array(region.convert("RGB"))
+    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+    yellow = (r >= 200) & (g >= 200) & (b <= 100)
+
+    for row_idx in range(yellow.shape[0]):
+        streak = 0
+        streak_start = None
+        for col_idx in range(yellow.shape[1]):
+            if yellow[row_idx, col_idx]:
+                if streak == 0:
+                    streak_start = col_idx
+                streak += 1
+            else:
+                if streak >= min_streak:
+                    found = (origin_x + streak_start, origin_y + row_idx)
+                    my_adena_x_y = (found[0] + 52, found[1] + 47)
+                    return found
+                streak = 0
+                streak_start = None
+        if streak >= min_streak:
+            found = (origin_x + streak_start, origin_y + row_idx)
+            my_adena_x_y = (found[0] + 52, found[1] + 47)
+            return found
+    return None
 

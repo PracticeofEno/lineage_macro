@@ -622,30 +622,57 @@ _CALIBRATION_TARGETS = [
 ]
 
 
+_SPI_GETMOUSE = 0x0003
+_SPI_SETMOUSE = 0x0004
+_SPI_GETMOUSESPEED = 0x0070
+_SPI_SETMOUSESPEED = 0x0071
+
+
 def calibrate_hid_scale() -> None:
     """HID scale을 학습시키기 위해 여러 좌표를 순서대로 이동한다."""
-    print("[macro] HID scale 보정 시작...")
-    for tx, ty in _CALIBRATION_TARGETS:
-        arduino_mouse_move_to(tx, ty)
-        time.sleep(0.1)
-    print(f"[macro] HID scale 보정 완료: sx={_hid_scale_x:.4f}  sy={_hid_scale_y:.4f}")
+    old_params = (ctypes.c_int * 3)()
+    ctypes.windll.user32.SystemParametersInfoW(_SPI_GETMOUSE, 0, old_params, 0)
+    old_speed = ctypes.c_int(0)
+    ctypes.windll.user32.SystemParametersInfoW(_SPI_GETMOUSESPEED, 0, ctypes.byref(old_speed), 0)
+
+    no_accel = (ctypes.c_int * 3)(0, 0, 0)
+    ctypes.windll.user32.SystemParametersInfoW(_SPI_SETMOUSE, 0, no_accel, 0)
+    ctypes.windll.user32.SystemParametersInfoW(_SPI_SETMOUSESPEED, 0, ctypes.c_void_p(10), 0)
+
+    try:
+        print("[macro] HID scale 보정 시작...")
+        for tx, ty in _CALIBRATION_TARGETS:
+            arduino_mouse_move_to(tx, ty)
+            time.sleep(0.1)
+        if _hid_scale_x is None or _hid_scale_y is None:
+            print("[macro] HID scale 보정 실패: 커서 이동이 감지되지 않았습니다.")
+        else:
+            print(f"[macro] HID scale 보정 완료: sx={_hid_scale_x:.4f}  sy={_hid_scale_y:.4f}")
+    finally:
+        ctypes.windll.user32.SystemParametersInfoW(_SPI_SETMOUSE, 0, old_params, 0)
+        ctypes.windll.user32.SystemParametersInfoW(_SPI_SETMOUSESPEED, 0, ctypes.c_void_p(old_speed.value), 0)
 
 
 def _wait_cursor_stop(timeout: float = 1.5, poll: float = 0.02, stable_needed: int = 5) -> None:
     """커서가 멈출 때까지 대기"""
     deadline = time.time() + timeout
-    prev = _get_cursor_pos()
+    start = _get_cursor_pos()
+    prev = start
+    moved = False
     stable = 0
     while time.time() < deadline:
         time.sleep(poll)
         cur = _get_cursor_pos()
-        if abs(cur[0] - prev[0]) <= 1 and abs(cur[1] - prev[1]) <= 1:
-            stable += 1
-            if stable >= stable_needed:
-                return
-        else:
-            stable = 0
-            prev = cur
+        if not moved and (abs(cur[0] - start[0]) > 1 or abs(cur[1] - start[1]) > 1):
+            moved = True
+        if moved:
+            if abs(cur[0] - prev[0]) <= 1 and abs(cur[1] - prev[1]) <= 1:
+                stable += 1
+                if stable >= stable_needed:
+                    return
+            else:
+                stable = 0
+        prev = cur
 
 
 def _update_hid_scale(hid_x: int, hid_y: int, moved_x: int, moved_y: int) -> None:

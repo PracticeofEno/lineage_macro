@@ -751,6 +751,36 @@ def pickup_lineage1(target_nickname: str | None = None):
     mouse_click_left()
     _sleep(0.1)
 
+def pickup_lineage2(target_nickname: str | None = None):
+    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
+    with open(data_path, encoding="utf-8") as f:
+        data = json.load(f)
+    x, y = tuple(data[_mouse_key])
+    force_set_foreground_window(lineage1_hwnd)
+    win32api.SetCursorPos((x, y))
+    time.sleep(0.1)
+
+    for attempt in range(4):
+        arduino_mouse_shift_click_right(x, y)
+        time.sleep(0.1)
+        img = screenshot(hwnd=lineage1_hwnd)
+        input_text = readInputText(img)
+        print(f"[macro] 타겟 확인 ({attempt+1}/4): '{input_text}' == '{target_nickname}'?")
+        arduino_key_down(win32con.VK_CONTROL)
+        arduino_key_press(win32con.VK_BACK)
+        arduino_key_up(win32con.VK_CONTROL)
+        time.sleep(0.1)
+        if input_text == target_nickname:
+            print("[macro] 타겟 고정 성공")
+            break
+    else:
+        print("[macro] 타겟 고정 실패 - pickup 진행")
+
+    key_press(win32con.VK_F5)
+    time.sleep(0.1)
+    mouse_click_left(x, y)
+    time.sleep(0.1)
+
 
 
 def checkExchangeRequest(img=None) -> bool:

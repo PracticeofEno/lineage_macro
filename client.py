@@ -63,7 +63,7 @@ def _handle_command(msg: dict) -> dict | None:
         nickname = msg.get("nickname")
         recv_time = datetime.now(timezone(timedelta(hours=9))).strftime("%H:%M:%S")
         print(f"[client] 픽업 명령 수신: {target} ({recv_time})")
-        macro.pickup_lineage1(target_nickname=nickname)
+        macro.pickup_lineage2(target_nickname=nickname)
         return {"status": "ok"}
 
     if cmd == "potion":

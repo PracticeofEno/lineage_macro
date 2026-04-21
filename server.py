@@ -177,10 +177,7 @@ def exchange_loop():
     WAIT_EXCHANGE_REQUEST, WAIT_NICKNAME, READ_ADENA, PICKUP = range(4)
     stage = WAIT_EXCHANGE_REQUEST
 
-    greeted_nickname = None
-    adena_before = None
-    prev_brightness = None
-    brightness_changed = False
+    greeted_nickname = ''
     _last_type_string_time = 0
     _last_status_print_time = 0
     _last_potion_idx_time: dict = {}
@@ -189,7 +186,6 @@ def exchange_loop():
     _need_read_own_adena = False
     _read_adena_moved = False
     own_adena = 0
-    prev_stage = None
 
     while running:
         # 교환 대기 및 잡무
@@ -286,7 +282,7 @@ def exchange_loop():
             if not nickname:
                 print("[server] 닉네임 사라짐 감지 → WAIT_EXCHANGE_REQUEST 복귀")
                 stage = WAIT_EXCHANGE_REQUEST
-                greeted_nickname = None
+                greeted_nickname = ''
                 _read_adena_moved = False
                 continue
             if not _read_adena_moved:
@@ -303,6 +299,12 @@ def exchange_loop():
             adena_after = macro.read_my_adena(img=img)
             print(f"[server] 아데나 변화 감지: {own_adena} → {adena_after}")
             received = adena_after - own_adena
+            if (received <= 0):
+                print("[server] 받은 아데나가 0이하이므로 픽업 분배 없이 WAIT_EXCHANGE_REQUEST로 복귀")
+                stage = WAIT_EXCHANGE_REQUEST
+                greeted_nickname = ''
+                own_adena = adena_after
+                continue
             pickup_count = int(received // macro.adena_per_pickup)
 
             # 핑 스레드의 concurrent 업데이트와 격리하기 위해 available을 별도 dict로 복사
@@ -357,7 +359,7 @@ def exchange_loop():
                     if remaining > 0:
                         print(f"[server] 픽업 명령 전송 실패 - 남은 픽업: {remaining}")
                     break
-
+                
             if win32gui.GetForegroundWindow() != macro.lineage1_hwnd:
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
             macro._sleep(0.1)
@@ -366,8 +368,8 @@ def exchange_loop():
                 macro.arduino_type_string(f"{display_name}님 감사합니당~!")
 
             stage = WAIT_EXCHANGE_REQUEST
-            greeted_nickname = None
-            own_adena = None
+            greeted_nickname = ''
+            own_adena = adena_after
 
 
 # ── 진입점 ────────────────────────────────────────────────────────────────────

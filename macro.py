@@ -848,7 +848,8 @@ def read_my_adena(img=None) -> int:
     if my_adena_x_y is None:
         find_adena_x_y(img)
     x, y = my_adena_x_y
-    arduino_mouse_move_to(x -52, y -47)
+    arduino_mouse_move_to(x -52, y -27)
+    img = screenshot()
     _sleep(0.1)
     cropped = crop(img, x, y, 300, 21)
     text = read_itemslot_number(cropped, 0, 0)

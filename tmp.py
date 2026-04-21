@@ -1,16 +1,18 @@
-import json
-import time
-import macro
+from PIL import Image
 import imageProcesser
+import numpy as np
 
-with open("converted_data.json", "r", encoding="utf-8") as f:
-    converted_data = json.load(f)
+def count_black(image: Image.Image) -> int:
+    arr = np.array(image.convert("RGB"))
+    mask = (arr[:,:,0] == 0) & (arr[:,:,1] == 0) & (arr[:,:,2] == 0)
+    return int(mask.sum())
 
-macro.set_hwnd(1117856)
-macro.move_window(0, 0)
+x = 853 - 5
+y = 906 - 31
+w = 5
+h = 5
+img = Image.open("aa.png")
+cropped = imageProcesser.crop(img, x, y, w, h)
 
-time.sleep(3)
-img = macro.screenshot()
-cropped = imageProcesser.crop(img, 985, 105, 1280-985, 21)
-cropped.save("cropped.png")
+print(count_black(cropped))
 cropped.show()

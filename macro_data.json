@@ -3,7 +3,7 @@
     "client_mouse_x_y": [565, 340],
     "client_numbering_mouse_x_y": [1359, 314],
 
-    "direction_threshold": 6,
+    "direction_threshold": 3,
     "adena_per_pickup": 200,
 
     "current_direction": "north",

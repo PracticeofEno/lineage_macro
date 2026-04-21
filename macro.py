@@ -751,22 +751,14 @@ def pickup_lineage1(target_nickname: str | None = None):
 
 
 
-def check_exchange_request(img=None) -> bool:
-    if img is None:
-        img = screenshot()
-    cropped = crop(img, 848 - 5, 877 - 5, 5, 5)
-    arr = np.array(cropped.convert("RGB"))
-    mask = (arr[:,:,0] == 0) & (arr[:,:,1] == 0) & (arr[:,:,2] == 0)
-    return int(mask.sum()) >= 7
-
-
 def checkExchangeRequest(img=None) -> bool:
     if img is None:
         img = screenshot()
-    r, g, b = img.getpixel((848, 877))
-    print(f"[macro] 교환 요청 픽셀 RGB: ({r}, {g}, {b})")
-    return (r, g, b) == (0, 0, 0)
-
+    cropped = crop(img, 848, 877, 5, 5)
+    arr = np.array(cropped.convert("RGB"))
+    mask = (arr[:,:,0] == 0) & (arr[:,:,1] == 0) & (arr[:,:,2] == 0)
+    print(f"[macro] 교환 요청 픽셀 검출: {mask.sum()} / 25")
+    return int(mask.sum()) >= 10
 
 def get_brightness(image: Image.Image) -> float:
     """이미지의 평균 밝기(0.0~255.0)를 반환한다."""

@@ -174,8 +174,8 @@ def _send_pickup(client: dict, nickname: str | None = None) -> bool:
 def exchange_loop():
     global running
 
-    WAIT_EXCHANGE_REQUEST, WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(5)
-    stage = WAIT_NICKNAME
+    WAIT_EXCHANGE_REQUEST, WAIT_NICKNAME, READ_ADENA, PICKUP = range(4)
+    stage = WAIT_EXCHANGE_REQUEST
 
     greeted_nickname = None
     adena_before = None
@@ -228,21 +228,22 @@ def exchange_loop():
                 print(f"총 {total_count}")
                 _last_status_print_time = time.time()
 
-            if total_count < macro.direction_threshold:
-                if macro.current_direction != macro.low_count_direction:
-                    macro.force_set_foreground_window(macro.lineage1_hwnd)
-                    macro._DIRECTION_FUNCS[macro.low_count_direction]()
-                    macro._sleep(1)
-                macro._sleep(0.5)
-                continue
-            else:
-                if macro.current_direction != macro.high_count_direction:
-                    macro.force_set_foreground_window(macro.lineage1_hwnd)
-                    macro._sleep(1)
-                    macro._DIRECTION_FUNCS[macro.high_count_direction]()
-                    macro._sleep(1)
+            # if total_count < macro.direction_threshold:
+            #     if macro.current_direction != macro.low_count_direction:
+            #         macro.force_set_foreground_window(macro.lineage1_hwnd)
+            #         macro._DIRECTION_FUNCS[macro.low_count_direction]()
+            #         macro._sleep(1)
+            #     macro._sleep(0.5)
+            #     continue
+            # else:
+            #     if macro.current_direction != macro.high_count_direction:
+            #         macro.force_set_foreground_window(macro.lineage1_hwnd)
+            #         macro._sleep(1)
+            #         macro._DIRECTION_FUNCS[macro.high_count_direction]()
+            #         macro._sleep(1)
 
-            if macro.check_exchange_request(img):
+            if macro.checkExchangeRequest(img):
+                print("[server] 교환 요청 감지")
                 macro.arduino_mouse_move_to(870,914)
                 macro.mouse_click_left()
                 stage = WAIT_NICKNAME

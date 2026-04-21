@@ -459,6 +459,8 @@ def init_setting(role: str):
     print(f"[macro] mouse_key={mouse_key}")
     print(f"[macro] direction_threshold={direction_threshold}, current={current_direction}, low={low_count_direction}, high={high_count_direction}")
     print(f"[macro] turn_xy={_TURN_XY}")
+    find_adena_x_y()
+    findExchangeNicknameY()
 
 
 def init_custom_hwnd(title: str, role: str = "client"):

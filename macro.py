@@ -819,7 +819,7 @@ def checkExchangeRequest(img=None) -> bool:
     cropped = crop(img, 848, 877, 5, 5)
     arr = np.array(cropped.convert("RGB"))
     mask = (arr[:,:,0] == 0) & (arr[:,:,1] == 0) & (arr[:,:,2] == 0)
-    print(f"[macro] 교환 요청 픽셀 검출: {mask.sum()} / 25")
+    # print(f"[macro] 교환 요청 픽셀 검출: {mask.sum()} / 25")
     return int(mask.sum()) >= 10
 
 def get_brightness(image: Image.Image) -> float:

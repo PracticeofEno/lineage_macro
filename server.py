@@ -230,7 +230,6 @@ def exchange_loop():
                     # macro.force_set_foreground_window(macro.lineage1_hwnd)
                     macro._DIRECTION_FUNCS[macro.low_count_direction]()
                     macro._sleep(1)
-                macro._sleep(0.5)
                 continue
             else:
                 if macro.current_direction != macro.high_count_direction:
@@ -290,6 +289,7 @@ def exchange_loop():
                 _read_adena_moved = True
             exchange_adena = macro.read_exchange_adena(img=img)
             if exchange_adena != 0:
+                greeted_nickname = nickname
                 macro.acceptExchange()
                 macro._sleep(0.5)
                 stage = PICKUP

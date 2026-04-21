@@ -8,7 +8,7 @@ def main() -> None:
     macro.calibrate_hid_scale()
     macro.force_set_foreground_window(macro.lineage1_hwnd)
     time.sleep(1)
-    macro.checkExchangeRequest()
+    macro.turn_east()
 
 
 if __name__ == "__main__":

@@ -225,19 +225,19 @@ def exchange_loop():
                 print(f"총 {total_count}")
                 _last_status_print_time = time.time()
 
-            # if total_count < macro.direction_threshold:
-            #     if macro.current_direction != macro.low_count_direction:
-            #         macro.force_set_foreground_window(macro.lineage1_hwnd)
-            #         macro._DIRECTION_FUNCS[macro.low_count_direction]()
-            #         macro._sleep(1)
-            #     macro._sleep(0.5)
-            #     continue
-            # else:
-            #     if macro.current_direction != macro.high_count_direction:
-            #         macro.force_set_foreground_window(macro.lineage1_hwnd)
-            #         macro._sleep(1)
-            #         macro._DIRECTION_FUNCS[macro.high_count_direction]()
-            #         macro._sleep(1)
+            if total_count < macro.direction_threshold:
+                if macro.current_direction != macro.low_count_direction:
+                    macro.force_set_foreground_window(macro.lineage1_hwnd)
+                    macro._DIRECTION_FUNCS[macro.low_count_direction]()
+                    macro._sleep(1)
+                macro._sleep(0.5)
+                continue
+            else:
+                if macro.current_direction != macro.high_count_direction:
+                    macro.force_set_foreground_window(macro.lineage1_hwnd)
+                    macro._sleep(1)
+                    macro._DIRECTION_FUNCS[macro.high_count_direction]()
+                    macro._sleep(1)
 
             if macro.checkExchangeRequest(img):
                 print("[server] 교환 요청 감지")
@@ -365,7 +365,7 @@ def exchange_loop():
             macro._sleep(0.1)
             if received > 0:
                 display_name = greeted_nickname[:2] if len(greeted_nickname) > 2 else greeted_nickname
-                macro.arduino_type_string(f"{display_name}님 감사합니당~!")
+                # macro.arduino_type_string(f"{display_name}님 감사합니당~!")
 
             stage = WAIT_EXCHANGE_REQUEST
             greeted_nickname = ''

@@ -642,7 +642,10 @@ def calibrate_hid_scale() -> None:
     try:
         print("[macro] HID scale 보정 시작...")
         for tx, ty in _CALIBRATION_TARGETS:
+            before = _get_cursor_pos()
             arduino_mouse_move_to(tx, ty)
+            after = _get_cursor_pos()
+            print(f"[calibrate] target=({tx},{ty})  before={before}  after={after}  moved=({after[0]-before[0]},{after[1]-before[1]})")
             time.sleep(0.1)
         if _hid_scale_x is None or _hid_scale_y is None:
             print("[macro] HID scale 보정 실패: 커서 이동이 감지되지 않았습니다.")

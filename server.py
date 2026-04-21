@@ -217,7 +217,7 @@ def exchange_loop():
                     _last_potion_idx_time[e["idx"]] = time.time()
                     if e["idx"] == 0 and "conn" in e:
                         time._sleep(0.5)
-                        macro.force_set_foreground_window(macro.lineage1_hwnd)
+                        # macro.force_set_foreground_window(macro.lineage1_hwnd)
             total_count = sum(e["available"] for e in clients_snapshot)
             if time.time() - _last_status_print_time >= 3:
                 for e in clients_snapshot:
@@ -227,15 +227,15 @@ def exchange_loop():
 
             if total_count < macro.direction_threshold:
                 if macro.current_direction != macro.low_count_direction:
-                    macro.force_set_foreground_window(macro.lineage1_hwnd)
+                    # macro.force_set_foreground_window(macro.lineage1_hwnd)
                     macro._DIRECTION_FUNCS[macro.low_count_direction]()
                     macro._sleep(1)
                 macro._sleep(0.5)
                 continue
             else:
                 if macro.current_direction != macro.high_count_direction:
-                    macro.force_set_foreground_window(macro.lineage1_hwnd)
-                    macro._sleep(1)
+                    # macro.force_set_foreground_window(macro.lineage1_hwnd)
+                    # macro._sleep(1)
                     macro._DIRECTION_FUNCS[macro.high_count_direction]()
                     macro._sleep(1)
 
@@ -360,8 +360,8 @@ def exchange_loop():
                         print(f"[server] 픽업 명령 전송 실패 - 남은 픽업: {remaining}")
                     break
                 
-            if win32gui.GetForegroundWindow() != macro.lineage1_hwnd:
-                macro.force_set_foreground_window(macro.lineage1_hwnd)
+            # if win32gui.GetForegroundWindow() != macro.lineage1_hwnd:
+            #     macro.force_set_foreground_window(macro.lineage1_hwnd)
             macro._sleep(0.1)
             if received > 0:
                 display_name = greeted_nickname[:2] if len(greeted_nickname) > 2 else greeted_nickname
@@ -402,7 +402,7 @@ if __name__ == "__main__":
             if exchange_thread and exchange_thread.is_alive():
                 print("[server] exchange 이미 실행 중")
             else:
-                macro.force_set_foreground_window(macro.lineage1_hwnd)
+                # macro.force_set_foreground_window(macro.lineage1_hwnd)
                 running = True
                 exchange_thread = threading.Thread(target=exchange_loop, daemon=True)
                 exchange_thread.start()

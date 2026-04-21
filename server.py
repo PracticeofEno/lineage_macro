@@ -188,6 +188,7 @@ def exchange_loop():
     _nickname_fail_count = 0
     _need_read_own_adena = False
     _read_adena_moved = False
+    own_adena = 0
     prev_stage = None
 
     while running:

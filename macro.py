@@ -778,7 +778,7 @@ def pickup_lineage2(target_nickname: str | None = None):
 
     key_press(win32con.VK_F5)
     time.sleep(0.1)
-    mouse_click_left(x, y)
+    mouse_click_left()
     time.sleep(0.1)
 
 

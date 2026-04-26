@@ -15,6 +15,18 @@ import win32gui
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONFIG_PATH = os.path.join(BASE_DIR, "meat_macro_config.json")
 POINT_NAMES = ("start", "end1", "end2", "end3", "end4")
+END_POINT_NAMES = POINT_NAMES[1:]
+DIRECTION_POINT_NAMES = tuple(f"dir{idx}" for idx in range(1, 9))
+DIRECTION_LABELS = {
+    1: "north",
+    2: "northeast",
+    3: "east",
+    4: "southeast",
+    5: "south",
+    6: "southwest",
+    7: "west",
+    8: "northwest",
+}
 
 
 class ProxyConnectionError(RuntimeError):
@@ -26,6 +38,7 @@ class TargetConfig:
     window_title_prefix: str
     start_screen_pos: list[int]
     end_screen_positions: list[list[int]]
+    direction_screen_positions: list[list[int]]
 
 
 @dataclass(slots=True)
@@ -54,11 +67,13 @@ def _default_config() -> MacroConfig:
                 window_title_prefix="server",
                 start_screen_pos=[0, 0],
                 end_screen_positions=[[0, 0] for _ in range(4)],
+                direction_screen_positions=[[0, 0] for _ in range(8)],
             ),
             "client": TargetConfig(
                 window_title_prefix="client",
                 start_screen_pos=[0, 0],
                 end_screen_positions=[[0, 0] for _ in range(4)],
+                direction_screen_positions=[[0, 0] for _ in range(8)],
             ),
         },
     )
@@ -85,6 +100,18 @@ def _normalize_end_positions(target_raw: dict) -> list[list[int]]:
     return positions
 
 
+def _normalize_direction_positions(target_raw: dict) -> list[list[int]]:
+    raw_positions = target_raw.get("direction_screen_positions")
+    if isinstance(raw_positions, list) and raw_positions:
+        positions = [_normalize_point(value) for value in raw_positions[:8]]
+    else:
+        positions = []
+
+    while len(positions) < 8:
+        positions.append([0, 0])
+    return positions
+
+
 def load_config(path: str) -> MacroConfig:
     if not os.path.exists(path):
         config = _default_config()
@@ -103,6 +130,7 @@ def load_config(path: str) -> MacroConfig:
                 target_raw.get("start_screen_pos", target_raw.get("start_client_pos", [0, 0]))
             ),
             end_screen_positions=_normalize_end_positions(target_raw),
+            direction_screen_positions=_normalize_direction_positions(target_raw),
         )
 
     return MacroConfig(
@@ -324,6 +352,34 @@ class MeatMacro:
         save_config(self._config_path, self._config)
         print(f"[set] saved {target_name} {point_name}: {screen_pos}")
 
+    def set_direction_preset(self, target_name: str, direction_index: int, x: int, y: int) -> None:
+        if direction_index not in DIRECTION_LABELS:
+            raise RuntimeError(f"unknown direction preset: {direction_index}")
+
+        target = self._config.targets[target_name]
+        screen_pos = [int(x), int(y)]
+        target.direction_screen_positions[direction_index - 1] = screen_pos
+        save_config(self._config_path, self._config)
+        print(
+            f"[set] saved {target_name} dir{direction_index} "
+            f"({DIRECTION_LABELS[direction_index]}): {screen_pos}"
+        )
+
+    def apply_direction_preset(self, target_name: str, point_name: str, direction_index: int) -> None:
+        if point_name not in END_POINT_NAMES:
+            raise RuntimeError("direction presets can only be applied to end1-end4")
+        if direction_index not in DIRECTION_LABELS:
+            raise RuntimeError(f"unknown direction preset: {direction_index}")
+
+        target = self._config.targets[target_name]
+        screen_pos = target.direction_screen_positions[direction_index - 1][:]
+        target.end_screen_positions[int(point_name[-1]) - 1] = screen_pos
+        save_config(self._config_path, self._config)
+        print(
+            f"[set] saved {target_name} {point_name} from "
+            f"dir{direction_index} ({DIRECTION_LABELS[direction_index]}): {screen_pos}"
+        )
+
     def run_target(self, target_name: str) -> None:
         target, hwnd, title = self.resolve_target(target_name)
         rect = move_window_to_origin(hwnd)
@@ -431,8 +487,19 @@ class MeatMacro:
                 f"prefix={target.window_title_prefix}, "
                 f"start={target.start_screen_pos}, "
                 f"ends={target.end_screen_positions}, "
+                f"dirs={target.direction_screen_positions}, "
                 f"window={window_info}"
             )
+
+
+def parse_direction_index(value: str) -> int:
+    cleaned = value.strip().lower()
+    if cleaned.startswith("dir"):
+        cleaned = cleaned[3:]
+    index = int(cleaned)
+    if index not in DIRECTION_LABELS:
+        raise RuntimeError("direction preset must be 1..8")
+    return index
 
 
 def parse_target_names(value: str) -> list[str]:
@@ -447,15 +514,22 @@ def print_help() -> None:
     print("Commands")
     print("  status")
     print("  set start server <x> <y>")
+    print("  set dir1 server <x> <y>")
+    print("  set dir8 client <x> <y>")
     print("  set end1 server <x> <y>")
+    print("  set end1 server <1-8>")
     print("  set end2 server <x> <y>")
+    print("  set end2 server <1-8>")
     print("  set end3 server <x> <y>")
+    print("  set end3 server <1-8>")
     print("  set end4 server <x> <y>")
+    print("  set end4 server <1-8>")
     print("  set start client <x> <y>")
     print("  set end1 client <x> <y>")
     print("  set end2 client <x> <y>")
     print("  set end3 client <x> <y>")
     print("  set end4 client <x> <y>")
+    print("  1=north 2=northeast 3=east 4=southeast 5=south 6=southwest 7=west 8=northwest")
     print("  run server")
     print("  run client")
     print("  run all")
@@ -490,8 +564,12 @@ def run_shell(app: MeatMacro) -> int:
                 app.stop_loop()
             elif parts == ["quit"] or parts == ["exit"]:
                 return 0
-            elif len(parts) == 5 and parts[0] == "set":
+            elif len(parts) == 5 and parts[0] == "set" and parts[1] in POINT_NAMES:
                 app.set_point(parts[2], parts[1], int(parts[3]), int(parts[4]))
+            elif len(parts) == 5 and parts[0] == "set" and parts[1] in DIRECTION_POINT_NAMES:
+                app.set_direction_preset(parts[2], parse_direction_index(parts[1]), int(parts[3]), int(parts[4]))
+            elif len(parts) == 4 and parts[0] == "set" and parts[1] in END_POINT_NAMES:
+                app.apply_direction_preset(parts[2], parts[1], parse_direction_index(parts[3]))
             elif len(parts) == 2 and parts[0] == "run":
                 app.run_many(parse_target_names(parts[1]))
             elif len(parts) == 3 and parts[0] == "loop" and parts[1] == "start":
@@ -516,8 +594,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--set",
-        choices=POINT_NAMES,
-        help="Set a point directly by absolute screen coordinates.",
+        choices=POINT_NAMES + DIRECTION_POINT_NAMES,
+        help="Set a point directly by absolute screen coordinates or save dir1-dir8 presets.",
     )
     parser.add_argument(
         "--target",
@@ -533,6 +611,11 @@ def parse_args() -> argparse.Namespace:
         "--y",
         type=int,
         help="Y coordinate for --set.",
+    )
+    parser.add_argument(
+        "--preset",
+        type=int,
+        help="Apply direction preset 1..8 to end1-end4 during --set.",
     )
     parser.add_argument(
         "--run",
@@ -554,9 +637,16 @@ def main() -> int:
         if args.set:
             if not args.target:
                 raise SystemExit("--set requires --target")
-            if args.x is None or args.y is None:
-                raise SystemExit("--set requires --x and --y")
-            app.set_point(args.target, args.set, args.x, args.y)
+            if args.set in DIRECTION_POINT_NAMES:
+                if args.x is None or args.y is None:
+                    raise SystemExit("--set dir1-dir8 requires --x and --y")
+                app.set_direction_preset(args.target, parse_direction_index(args.set), args.x, args.y)
+            elif args.preset is not None:
+                app.apply_direction_preset(args.target, args.set, args.preset)
+            else:
+                if args.x is None or args.y is None:
+                    raise SystemExit("--set requires --x and --y")
+                app.set_point(args.target, args.set, args.x, args.y)
             return 0
 
         if args.run:

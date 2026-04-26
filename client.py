@@ -55,7 +55,10 @@ def _handle_command(msg: dict) -> dict | None:
 
     if cmd == "ping":
         mp = macro.readMp()
-        print(f"[client] ping 수신 → MP: {mp}")
+        if mp is None:
+            print("[client] ping 수신 → MP 읽기 실패")
+        else:
+            print(f"[client] ping 수신 → MP: {mp}")
         return {"status": "pong", "mp": mp}
 
     if cmd == "pickup":

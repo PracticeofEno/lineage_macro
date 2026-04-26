@@ -273,7 +273,7 @@ _TURN_XY = {
     'north':     (648, 228),
     'northeast': (754, 272),
     'east':      (839, 405),
-    'southeast': (754, 484),
+    'southeast': (680, 410),
     'south':     (648, 528),
     'southwest': (542, 484),
     'west':      (436, 407),
@@ -618,36 +618,27 @@ def pickup_lineage1(target_nickname: str | None = None):
     win32api.SetCursorPos((x, y))
     time.sleep(0.1)
 
-    img = screenshot(hwnd=lineage1_hwnd)
-    input_text = readInputText(img)
-    if target_nickname is None:
-        print(f"[macro] current target check: '{input_text}' (target_nickname=None)")
-        target_locked = False
+    for attempt in range(4):
+        arduino_mouse_shift_click_right(x, y)
+        time.sleep(0.1)
+        img = screenshot(hwnd=lineage1_hwnd)
+        input_text = readInputText(img)
+        print(f"[macro] 타겟 확인 ({attempt+1}/4): '{input_text}' == '{target_nickname}'?")
+        arduino_key_down(win32con.VK_CONTROL)
+        arduino_key_press(win32con.VK_BACK)
+        arduino_key_up(win32con.VK_CONTROL)
+        time.sleep(0.1)
+        if input_text == target_nickname:
+            print("[macro] 타겟 고정 성공")
+            break
     else:
-        print(f"[macro] current target check: '{input_text}' == '{target_nickname}'?")
-        target_locked = input_text == target_nickname
-
-    if not target_locked:
-        for attempt in range(4):
-            arduino_mouse_shift_click_right(x, y)
-            time.sleep(0.1)
-            img = screenshot(hwnd=lineage1_hwnd)
-            input_text = readInputText(img)
-            print(f"[macro] target check ({attempt+1}/4): '{input_text}' == '{target_nickname}'?")
-            arduino_key_down(win32con.VK_CONTROL)
-            arduino_key_press(win32con.VK_BACK)
-            arduino_key_up(win32con.VK_CONTROL)
-            time.sleep(0.1)
-            if target_nickname is None or input_text == target_nickname:
-                print("[macro] target lock success")
-                break
-        else:
-            print("[macro] target lock failed - continue pickup")
+        print("[macro] 타겟 고정 실패 - pickup 진행")
 
     key_press(win32con.VK_F5)
     time.sleep(0.1)
     mouse_click_left(x, y)
     time.sleep(0.1)
+
 
 
 def checkExchangeRequest(img=None) -> bool:
@@ -664,7 +655,7 @@ def get_brightness(image: Image.Image) -> float:
     return float(arr.mean())
 
 
-def readMp(img=None) -> int:
+def readMp(img=None) -> int | None:
     if img is None:
         img = screenshot()
     for dx in (0, 5, 10):
@@ -674,7 +665,7 @@ def readMp(img=None) -> int:
         digits = ''.join(c for c in parts[0] if c.isdigit())
         if digits:
             return int(digits)
-    return 0
+    return None
 
 
 def readAdena() -> int:
@@ -760,4 +751,23 @@ _DIRECTION_FUNCS = {
     'south': turn_south, 'southwest': turn_southwest,
     'west': turn_west, 'northwest': turn_northwest,
 }
+
+
+def turn_to(direction: str, force: bool = False, settle_delay: float = 1.0) -> bool:
+    func = _DIRECTION_FUNCS.get(direction)
+    if func is None:
+        print(f"[macro] 알 수 없는 방향: {direction!r}")
+        return False
+    if not force and current_direction == direction:
+        return False
+
+    force_set_foreground_window(lineage1_hwnd)
+    func()
+    if settle_delay > 0:
+        time.sleep(settle_delay)
+    return True
+
+
+def sync_direction(force: bool = True, settle_delay: float = 1.0) -> bool:
+    return turn_to(current_direction, force=force, settle_delay=settle_delay)
 

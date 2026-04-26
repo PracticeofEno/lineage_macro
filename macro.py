@@ -733,6 +733,29 @@ def readInputText(img=None) -> str:
     return read_text(img, 249, 933, (0xff, 0xff, 0xff)).replace('|', '')
 
 
+_pickup_xy: tuple[int, int] | None = None
+
+def has_target_in_input() -> bool:
+    """shift+우클릭으로 타겟 확인 후 입력창 초기화, 타겟이 있으면 True 반환"""
+    global _pickup_xy
+    if _pickup_xy is None:
+        data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
+        with open(data_path, encoding="utf-8") as f:
+            data = json.load(f)
+        _pickup_xy = tuple(data[_mouse_key])
+    x, y = _pickup_xy
+    win32api.SetCursorPos((x, y))
+    arduino_mouse_shift_click_right(x, y)
+    time.sleep(0.1)
+    img = screenshot(hwnd=lineage1_hwnd)
+    input_text = readInputText(img)
+    arduino_key_down(win32con.VK_CONTROL)
+    arduino_key_press(win32con.VK_BACK)
+    arduino_key_up(win32con.VK_CONTROL)
+    time.sleep(0.1)
+    return bool(input_text)
+
+
 def monitor_chat():
     prev = None
     while True:

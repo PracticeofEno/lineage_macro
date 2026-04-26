@@ -258,7 +258,8 @@ def exchange_loop():
                 stage = READ_ADENA
                 continue
 
-            macro._arduino_send(f'KP,{win32con.VK_F7}')
+            if macro.has_target_in_input():
+                macro._arduino_send(f'KP,{win32con.VK_F7}')
             time.sleep(0.5)
 
         # ── Stage 2: 교환 전 아데나 1회 측정 ────────────────────────────────

@@ -282,7 +282,7 @@ def exchange_loop():
             brightness = macro.get_brightness(slot)
             print(f"[server] 슬롯 밝기: {brightness:.2f}")
 
-            if prev_brightness is not None and brightness != prev_brightness:
+            if (prev_brightness is not None) and (brightness != prev_brightness or brightness > 110):
                 brightness_changed = True
                 macro.acceptExchange()
             prev_brightness = brightness

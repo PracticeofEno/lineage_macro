@@ -36,7 +36,7 @@
         "northwest": [1359, 314]
     },
     "haste_check_interval_seconds": 3.0,
-    "direction_change_nicknames": ["헤이로집산다", "질서유지", "헤이핫딜맨", "헤이달러맨", "헤이지니맨", "헤이시리맨", "먼골효"],
+    "direction_change_nicknames": ["헤이로집산다", "질서유지", "더드림", "꼭드림", "또드림", "다드림", "왜드림", "막드림"],
     "blocked_turn_directions": ["north", "east", "south", "west"],
     "direction_threshold": 6,
     "adena_per_pickup": 150,

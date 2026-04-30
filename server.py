@@ -25,6 +25,16 @@ POTION_COOLDOWN = 600 # 포션 쿨타임(초)
 LOW_MP_AVAILABLE_THRESHOLD = 2
 HASTE_CHECK_DEFAULT_INTERVAL = 3.0
 DIRECTION_RETURN_CHECK_INTERVAL = 30.0
+TURN_DIRECTIONS = (
+    "north",
+    "northeast",
+    "east",
+    "southeast",
+    "south",
+    "southwest",
+    "west",
+    "northwest",
+)
 
 # ── 클라이언트 관리 ───────────────────────────────────────────────────────────
 # client: {"conn": socket, "addr": tuple, "lock": Lock, "mp": int, "idx": int}
@@ -47,6 +57,23 @@ def _read_direction_change_nicknames(data: dict) -> set[str]:
     else:
         nicknames = []
     return {str(n).strip() for n in nicknames if str(n).strip()}
+
+
+def _read_blocked_turn_directions(data: dict) -> set[str]:
+    raw_directions = data.get("blocked_turn_directions", [])
+    if isinstance(raw_directions, str):
+        directions = [raw_directions]
+    elif isinstance(raw_directions, (list, tuple, set)):
+        directions = raw_directions
+    else:
+        directions = []
+    return {str(direction).strip() for direction in directions if str(direction).strip()}
+
+
+def _load_macro_data() -> dict:
+    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
+    with open(data_path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -189,9 +216,7 @@ def _send_pickup(client: dict, nickname: str | None = None, direction: str | Non
 
 
 def _load_haste_check_config(direction: str) -> tuple[tuple[int, int], float, set[str]]:
-    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
-    with open(data_path, encoding="utf-8") as f:
-        data = json.load(f)
+    data = _load_macro_data()
 
     xy = macro.get_configured_mouse_xy("server_mouse_x_y", direction=direction)
 
@@ -258,6 +283,55 @@ def _try_haste_front_person(check_xy: tuple[int, int], direction_change_nickname
     print(f"[haste] 앞사람 감지: '{nickname}' at {check_xy} -> F7")
     macro._arduino_send(f'KP,{win32con.VK_F7}')
     return "haste"
+
+
+def _choose_recovered_shop_direction(preferred_direction: str) -> str | None:
+    data = _load_macro_data()
+    direction_change_nicknames = _read_direction_change_nicknames(data)
+    blocked_directions = _read_blocked_turn_directions(data)
+    excluded_directions = {macro.low_count_direction, *blocked_directions}
+
+    candidates: list[str] = []
+    if preferred_direction in TURN_DIRECTIONS and preferred_direction not in excluded_directions:
+        candidates.append(preferred_direction)
+
+    fallback_candidates = [
+        direction
+        for direction in TURN_DIRECTIONS
+        if direction not in excluded_directions and direction != preferred_direction
+    ]
+    random.shuffle(fallback_candidates)
+    candidates.extend(fallback_candidates)
+
+    if not candidates:
+        print(
+            "[server] MP 회복 후 방향 후보 없음: "
+            f"preferred={preferred_direction}, excluded={sorted(excluded_directions)}"
+        )
+        return None
+
+    for direction in candidates:
+        check_xy = macro.get_configured_mouse_xy("server_mouse_x_y", direction=direction)
+        nickname = _read_nickname_at_xy(check_xy)
+        if nickname in direction_change_nicknames:
+            reason = "기본 방향" if direction == preferred_direction else "대체 방향"
+            print(f"[server] MP 회복 후 {reason} 차단: '{nickname}' at {check_xy} -> {direction}")
+            continue
+
+        if direction == preferred_direction:
+            print(
+                "[server] MP 회복 후 방향 전환 허용: "
+                f"지정 닉네임 없음('{nickname}') at {check_xy} -> {direction}"
+            )
+        else:
+            print(
+                "[server] MP 회복 후 대체 방향 선택: "
+                f"지정 닉네임 없음('{nickname}') at {check_xy} -> {direction}"
+            )
+        return direction
+
+    print("[server] MP 회복 후 방향 전환 실패: 모든 후보 방향에 지정 닉네임 감지")
+    return None
 
 
 # ── Exchange 루프 ──────────────────────────────────────────────────────────────
@@ -338,23 +412,19 @@ def exchange_loop():
                 was_low_mp = True
                 if macro.turn_to(macro.low_count_direction):
                     print(f"[server] 저MP 감지 -> {macro.low_count_direction}")
-                # if time.time() - _last_type_string_time >= 10:
-                #     macro.arduino_type_string("MP회복중입니다.")
+                if time.time() - _last_type_string_time >= 16:
+                    macro.arduino_type_string("죄송합니다. 마나회복중입니다.")
                     _last_type_string_time = time.time()
                 time.sleep(0.5)
                 continue
             else:
                 if was_low_mp:
-                    recover_direction = macro.high_count_direction
-                    recover_check_xy, _, recover_nicknames = _load_haste_check_config(recover_direction)
-                    recover_nickname = _read_nickname_at_xy(recover_check_xy)
-                    if recover_nickname in recover_nicknames:
-                        print(f"[server] MP 회복 후 방향 전환 보류: '{recover_nickname}' at {recover_check_xy} -> {recover_direction} 차단")
+                    recover_direction = _choose_recovered_shop_direction(macro.high_count_direction)
+                    if recover_direction is None:
                         time.sleep(0.5)
                         continue
 
                     shop_direction = recover_direction
-                    print(f"[server] MP 회복 후 방향 전환 허용: 지정 닉네임 없음('{recover_nickname}') at {recover_check_xy} -> {shop_direction}")
                     was_low_mp = False
 
                 if macro.turn_to(shop_direction):

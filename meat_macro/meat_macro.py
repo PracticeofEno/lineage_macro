@@ -17,6 +17,7 @@ DEFAULT_CONFIG_PATH = os.path.join(BASE_DIR, "meat_macro_config.json")
 POINT_NAMES = ("start", "end1", "end2", "end3", "end4")
 END_POINT_NAMES = POINT_NAMES[1:]
 DIRECTION_POINT_NAMES = tuple(f"dir{idx}" for idx in range(1, 9))
+LINEAGE_WINDOW_TITLE_PREFIX = "Lineage Classic"
 DIRECTION_LABELS = {
     1: "north",
     2: "northeast",
@@ -255,10 +256,25 @@ class ArduinoProxyClient:
         self.expect_ok(f"KP,{vk}")
 
 
+def enum_visible_windows() -> list[tuple[int, str]]:
+    windows: list[tuple[int, str]] = []
+
+    def callback(hwnd: int, _extra) -> None:
+        if not win32gui.IsWindowVisible(hwnd):
+            return
+        title = win32gui.GetWindowText(hwnd)
+        if title:
+            windows.append((hwnd, title))
+
+    win32gui.EnumWindows(callback, None)
+    return windows
+
+
 class WindowResolver:
-    def __init__(self, title_prefix: str):
+    def __init__(self, title_prefix: str, auto_rename_lineage: bool = True):
         self._title_prefix = title_prefix
         self._title_prefix_lower = title_prefix.casefold()
+        self._auto_rename_lineage = auto_rename_lineage
         self._hwnd: int | None = None
 
     def resolve(self) -> tuple[int, str]:
@@ -267,24 +283,56 @@ class WindowResolver:
             if title and title.casefold().startswith(self._title_prefix_lower):
                 return self._hwnd, title
 
-        matches: list[tuple[int, str]] = []
+        windows = enum_visible_windows()
+        exact_match = self._find_title_match(windows, exact_only=True)
+        if exact_match is not None:
+            self._hwnd, title = exact_match
+            return self._hwnd, title
 
-        def callback(hwnd: int, _extra) -> None:
-            if not win32gui.IsWindowVisible(hwnd):
-                return
-            title = win32gui.GetWindowText(hwnd)
-            if not title:
-                return
-            if title.casefold().startswith(self._title_prefix_lower):
-                matches.append((hwnd, title))
+        if self._auto_rename_lineage:
+            lineage_match = self._find_lineage_window(windows)
+            if lineage_match is not None:
+                hwnd, old_title = lineage_match
+                win32gui.SetWindowText(hwnd, self._title_prefix)
+                time.sleep(0.05)
+                title = win32gui.GetWindowText(hwnd) or self._title_prefix
+                self._hwnd = hwnd
+                print(f"[window] renamed '{old_title}' -> '{title}'")
+                return self._hwnd, title
 
-        win32gui.EnumWindows(callback, None)
+        prefix_match = self._find_title_match(windows, exact_only=False)
+        if prefix_match is not None:
+            self._hwnd, title = prefix_match
+            return self._hwnd, title
+
+        raise RuntimeError(f"window not found: {self._title_prefix}")
+
+    def _find_title_match(
+        self,
+        windows: list[tuple[int, str]],
+        exact_only: bool,
+    ) -> tuple[int, str] | None:
+        if exact_only:
+            for hwnd, title in windows:
+                if title.casefold() == self._title_prefix_lower:
+                    return hwnd, title
+            return None
+
+        matches = [
+            (hwnd, title)
+            for hwnd, title in windows
+            if title.casefold().startswith(self._title_prefix_lower)
+        ]
         if not matches:
-            raise RuntimeError(f"window not found: {self._title_prefix}")
+            return None
+        return matches[0]
 
-        exact = [entry for entry in matches if entry[1].casefold() == self._title_prefix_lower]
-        self._hwnd, title = exact[0] if exact else matches[0]
-        return self._hwnd, title
+    @staticmethod
+    def _find_lineage_window(windows: list[tuple[int, str]]) -> tuple[int, str] | None:
+        for hwnd, title in windows:
+            if title.startswith(LINEAGE_WINDOW_TITLE_PREFIX):
+                return hwnd, title
+        return None
 
 
 def focus_window(hwnd: int) -> None:

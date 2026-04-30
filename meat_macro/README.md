@@ -106,6 +106,7 @@ Interactive loop commands:
 ## Notes
 
 - Before each run, the matched `server` or `client` window is moved to `(0, 0)` automatically.
+- If a configured `server` or `client` window is not found, the macro can use a visible `Lineage Classic` window and rename it automatically.
 - The start point is fixed per window and each window has 4 separate end points.
 - You can save 8 direction presets per target and then apply them with just `1` to `8`.
 - Direction numbering is clockwise from 12 o'clock: `1=north`, `2=northeast`, `3=east`, `4=southeast`, `5=south`, `6=southwest`, `7=west`, `8=northwest`.

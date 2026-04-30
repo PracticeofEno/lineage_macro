@@ -57,6 +57,7 @@ def _handle_command(msg: dict) -> dict | None:
         mp = macro.readMp()
         if mp is None:
             print("[client] ping 수신 → MP 읽기 실패")
+            macro.press_ctrl_a_for_mp_retry()
         else:
             print(f"[client] ping 수신 → MP: {mp}")
         return {"status": "pong", "mp": mp}
@@ -64,9 +65,10 @@ def _handle_command(msg: dict) -> dict | None:
     if cmd == "pickup":
         target = msg.get("target")
         nickname = msg.get("nickname")
+        direction = msg.get("direction")
         recv_time = datetime.now(timezone(timedelta(hours=9))).strftime("%H:%M:%S")
         print(f"[client] 픽업 명령 수신: {target} ({recv_time})")
-        macro.pickup_lineage1(target_nickname=nickname)
+        macro.pickup_lineage1(target_nickname=nickname, direction=direction)
         return {"status": "ok"}
 
     if cmd == "potion":

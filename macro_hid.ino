@@ -12,6 +12,8 @@
  *   CL,<x>,<y>      마우스 좌클릭  (절대 좌표 이동 후 클릭)
  *   CR,<x>,<y>      마우스 우클릭  (절대 좌표 이동 후 클릭)
  *   MM,<x>,<y>      마우스 이동    (절대 좌표)
+ *   LD              마우스 좌버튼 누름
+ *   LU              마우스 좌버튼 뗌
  *   CL              마우스 좌클릭  (이동 없이 현재 위치에서 클릭)
  *   CR              마우스 우클릭  (이동 없이 현재 위치에서 클릭)
  *   BS,<n>          백스페이스 n 회
@@ -168,6 +170,13 @@ void processCommand(const String &cmd) {
         int x  = rest.substring(0, c2).toInt();
         int y  = rest.substring(c2 + 1).toInt();
         moveTo(x, y);
+
+    // meat_macro drag support: left button down/up without moving.
+    } else if (action == "LD") {
+        Mouse.press(MOUSE_LEFT);
+
+    } else if (action == "LU") {
+        Mouse.release(MOUSE_LEFT);
 
     // ── 마우스 좌클릭 (좌표 있으면 이동 후 클릭, 없으면 현재 위치) ──
     } else if (action == "CL") {

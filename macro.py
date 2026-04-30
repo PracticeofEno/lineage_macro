@@ -2,6 +2,7 @@ from itertools import count
 import os
 import sys
 import json
+import random
 import win32api
 import win32com
 import win32con
@@ -279,6 +280,7 @@ _TURN_XY = {
     'west':      (436, 407),
     'northwest': (542, 272),
 }
+_DIRECTIONS = tuple(_TURN_XY.keys())
 
 def turn_north():
     global current_direction
@@ -336,6 +338,58 @@ high_count_direction = 'northwest'
 exchange_yes_button = (869, 914)  # 교환 수락 Yes 좌표
 exchange_no_button = (917, 912)   # 교환 수락 No 좌표
 _exchange_nickname_xy: tuple[int, int] | None = None
+_last_mp_retry_ctrl_a_time = 0.0
+
+
+def _load_macro_data() -> dict:
+    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
+    with open(data_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _coerce_xy(value, key: str) -> tuple[int, int]:
+    if not isinstance(value, (list, tuple)) or len(value) < 2:
+        raise RuntimeError(f"invalid {key}: {value!r}")
+    return int(value[0]), int(value[1])
+
+
+def _resolve_direction_xy(data: dict, key: str, direction: str) -> tuple[int, int] | None:
+    for config_key in (f"{key}_by_direction", key):
+        value = data.get(config_key)
+        if isinstance(value, dict):
+            if direction in value:
+                return _coerce_xy(value[direction], f"{config_key}.{direction}")
+            if "default" in value:
+                return _coerce_xy(value["default"], f"{config_key}.default")
+        elif value is not None:
+            return _coerce_xy(value, config_key)
+    return None
+
+
+def get_configured_mouse_xy(
+    key: str | None = None,
+    fallback_key: str | None = None,
+    direction: str | None = None,
+) -> tuple[int, int]:
+    if key is None:
+        key = _mouse_key
+    if key is None:
+        raise RuntimeError("mouse key is not initialized. call init_setting() first.")
+
+    data = _load_macro_data()
+    direction = direction or current_direction
+    if not isinstance(direction, str):
+        direction = str(direction)
+    keys = [key]
+    if fallback_key and fallback_key not in keys:
+        keys.append(fallback_key)
+
+    for config_key in keys:
+        xy = _resolve_direction_xy(data, config_key, direction)
+        if xy is not None:
+            return xy
+
+    raise RuntimeError(f"missing mouse coordinate config for {keys!r}")
 
 
 def set_hwnd(hwnd: int):
@@ -445,7 +499,7 @@ def init_setting(role: str):
     current_direction = data["current_direction"]
     low_count_direction = data["low_count_direction"]
     high_count_direction = data["high_count_direction"]
-    for d in ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest']:
+    for d in _DIRECTIONS:
         _TURN_XY[d] = tuple(data[f"turn_{d}_xy"])
 
     print(f"[macro] mouse_key={mouse_key}")
@@ -504,7 +558,7 @@ def init_custom_hwnd(title: str, role: str = "client"):
     current_direction = data["current_direction"]
     low_count_direction = data["low_count_direction"]
     high_count_direction = data["high_count_direction"]
-    for d in ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest']:
+    for d in _DIRECTIONS:
         _TURN_XY[d] = tuple(data[f"turn_{d}_xy"])
 
     print(f"[macro] mouse_key={mouse_key}")
@@ -609,21 +663,34 @@ def use_potion():
     _arduino_send(f'KP,{win32con.VK_F8}')
 
 
-def pickup_lineage1(target_nickname: str | None = None):
-    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
-    with open(data_path, encoding="utf-8") as f:
-        data = json.load(f)
-    x, y = tuple(data[_mouse_key])
+def press_ctrl_a_for_mp_retry(cooldown: float = 3.0) -> bool:
+    global _last_mp_retry_ctrl_a_time
+    now = time.time()
+    if now - _last_mp_retry_ctrl_a_time < cooldown:
+        return False
+
+    force_set_foreground_window(lineage1_hwnd)
+    arduino_key_down(win32con.VK_CONTROL)
+    arduino_key_press(ord('A'))
+    arduino_key_up(win32con.VK_CONTROL)
+    _last_mp_retry_ctrl_a_time = now
+    print("[macro] MP 인식 실패 -> Ctrl+A")
+    time.sleep(0.1)
+    return True
+
+
+def pickup_lineage1(target_nickname: str | None = None, direction: str | None = None):
+    x, y = get_configured_mouse_xy(direction=direction)
     force_set_foreground_window(lineage1_hwnd)
     win32api.SetCursorPos((x, y))
     time.sleep(0.1)
 
-    for attempt in range(4):
+    for attempt in range(10):
         arduino_mouse_shift_click_right(x, y)
         time.sleep(0.1)
         img = screenshot(hwnd=lineage1_hwnd)
         input_text = readInputText(img)
-        print(f"[macro] 타겟 확인 ({attempt+1}/4): '{input_text}' == '{target_nickname}'?")
+        print(f"[macro] 타겟 확인 ({attempt+1}/10): '{input_text}' == '{target_nickname}'?")
         arduino_key_down(win32con.VK_CONTROL)
         arduino_key_press(win32con.VK_BACK)
         arduino_key_up(win32con.VK_CONTROL)
@@ -668,10 +735,14 @@ def readMp(img=None) -> int | None:
     return None
 
 
-def readAdena() -> int:
+def readAdena(max_attempts: int | None = None, key_delay: float = 0.2) -> int | None:
     force_set_foreground_window(lineage1_hwnd)
-    while True:
+    attempts = 0
+    while max_attempts is None or attempts < max_attempts:
+        attempts += 1
         key_press(win32con.VK_F9)
+        if key_delay > 0:
+            time.sleep(key_delay)
         img = screenshot()
         cropped = crop(img, 228 + 60 + 5 + 5, 883, 500, 21)
         text = read_text(cropped, 0, 0, (0xFF, 0xF1, 0xB5))
@@ -686,6 +757,7 @@ def readAdena() -> int:
                 continue
             return value
         time.sleep(0.5)
+    return None
 
 
 def readExchangeNickname(img=None):
@@ -766,6 +838,28 @@ def turn_to(direction: str, force: bool = False, settle_delay: float = 1.0) -> b
     if settle_delay > 0:
         time.sleep(settle_delay)
     return True
+
+
+def turn_random_excluding(excluded_direction: str, settle_delay: float = 1.0) -> str | None:
+    data = _load_macro_data()
+    blocked = data.get("blocked_turn_directions", [])
+    if isinstance(blocked, str):
+        blocked_directions = {blocked}
+    elif isinstance(blocked, (list, tuple, set)):
+        blocked_directions = {str(direction) for direction in blocked}
+    else:
+        blocked_directions = set()
+
+    excluded = {excluded_direction, current_direction, *blocked_directions}
+    candidates = [direction for direction in _DIRECTION_FUNCS if direction not in excluded]
+    if not candidates:
+        print(f"[macro] random turn candidates empty. excluded={excluded_direction!r}, blocked={sorted(blocked_directions)}")
+        return None
+
+    direction = random.choice(candidates)
+    if turn_to(direction, settle_delay=settle_delay):
+        return direction
+    return None
 
 
 def sync_direction(force: bool = True, settle_delay: float = 1.0) -> bool:

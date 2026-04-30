@@ -24,6 +24,7 @@ SAME_UNIT_DELAY = 1   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
 POTION_COOLDOWN = 600 # 포션 쿨타임(초)
 LOW_MP_AVAILABLE_THRESHOLD = 2
 HASTE_CHECK_DEFAULT_INTERVAL = 3.0
+DIRECTION_RETURN_CHECK_INTERVAL = 30.0
 
 # ── 클라이언트 관리 ───────────────────────────────────────────────────────────
 # client: {"conn": socket, "addr": tuple, "lock": Lock, "mp": int, "idx": int}
@@ -35,6 +36,17 @@ _clients_lock = threading.Lock()
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
 _server_running = True  # accept 루프 제어 (q 입력 시에만 False)
+
+
+def _read_direction_change_nicknames(data: dict) -> set[str]:
+    raw_nicknames = data.get("direction_change_nicknames", data.get("direction_change_nickname", []))
+    if isinstance(raw_nicknames, str):
+        nicknames = [raw_nicknames]
+    elif isinstance(raw_nicknames, (list, tuple, set)):
+        nicknames = raw_nicknames
+    else:
+        nicknames = []
+    return {str(n).strip() for n in nicknames if str(n).strip()}
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -145,7 +157,7 @@ def _accept_loop(server_sock: socket.socket):
 
 
 # ── 픽업 명령 전송 ─────────────────────────────────────────────────────────────
-def _send_pickup(client: dict, nickname: str | None = None) -> bool:
+def _send_pickup(client: dict, nickname: str | None = None, direction: str | None = None) -> bool:
     """특정 클라이언트에게 pickup 명령을 보내고 ack를 기다린다."""
     conn = client["conn"]
     addr = client["addr"]
@@ -153,6 +165,8 @@ def _send_pickup(client: dict, nickname: str | None = None) -> bool:
         payload = {"cmd": "pickup", "target": "lineage1"}
         if nickname:
             payload["nickname"] = nickname
+        if direction:
+            payload["direction"] = direction
         if not _send_json(conn, payload):
             _remove_client(client)
             return False
@@ -174,19 +188,38 @@ def _send_pickup(client: dict, nickname: str | None = None) -> bool:
         return False
 
 
-def _load_haste_check_config() -> tuple[tuple[int, int], float]:
+def _load_haste_check_config(direction: str) -> tuple[tuple[int, int], float, set[str]]:
     data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
     with open(data_path, encoding="utf-8") as f:
         data = json.load(f)
 
-    xy = data.get("server_mouse_x_y", [0, 0])
-    if not isinstance(xy, (list, tuple)) or len(xy) < 2:
-        raise RuntimeError(f"invalid server_mouse_x_y: {xy!r}")
+    xy = macro.get_configured_mouse_xy("server_mouse_x_y", direction=direction)
 
     interval = float(data.get("haste_check_interval_seconds", HASTE_CHECK_DEFAULT_INTERVAL))
     if interval <= 0:
         interval = HASTE_CHECK_DEFAULT_INTERVAL
-    return (int(xy[0]), int(xy[1])), interval
+
+    direction_change_nicknames = _read_direction_change_nicknames(data)
+
+    return xy, interval, direction_change_nicknames
+
+
+def _read_adena_after_exchange(adena_before: int | None, timeout: float = 6.0) -> int | None:
+    deadline = time.time() + timeout
+    last_value = None
+
+    while True:
+        value = macro.readAdena(max_attempts=3)
+        if value is not None:
+            last_value = value
+            if adena_before is None or value > adena_before:
+                return value
+
+        if time.time() >= deadline:
+            return last_value
+
+        print(f"[server] 아데나 재확인 중: before={adena_before}, current={last_value}")
+        time.sleep(0.5)
 
 
 def _clear_chat_input() -> None:
@@ -196,7 +229,7 @@ def _clear_chat_input() -> None:
     time.sleep(0.1)
 
 
-def _try_haste_front_person(check_xy: tuple[int, int]) -> bool:
+def _read_nickname_at_xy(check_xy: tuple[int, int]) -> str:
     x, y = check_xy
     macro.force_set_foreground_window(macro.lineage1_hwnd)
     macro.arduino_mouse_shift_click_right(x, y)
@@ -205,14 +238,26 @@ def _try_haste_front_person(check_xy: tuple[int, int]) -> bool:
     img = macro.screenshot(hwnd=macro.lineage1_hwnd)
     nickname = macro.readInputText(img).strip()
     _clear_chat_input()
+    return nickname
 
+
+def _try_haste_front_person(check_xy: tuple[int, int], direction_change_nicknames: set[str]) -> str | None:
+    nickname = _read_nickname_at_xy(check_xy)
     if not nickname:
         print(f"[haste] 앞사람 감지 없음 at {check_xy}")
-        return False
+        return None
+
+    if nickname in direction_change_nicknames:
+        direction = macro.turn_random_excluding(macro.low_count_direction)
+        if direction is None:
+            print(f"[haste] 지정 닉네임 감지: '{nickname}' at {check_xy} -> 거래신청 안 함, 랜덤 방향 전환 실패")
+            return None
+        print(f"[haste] 지정 닉네임 감지: '{nickname}' at {check_xy} -> 거래신청 안 함, {direction} 전환")
+        return direction
 
     print(f"[haste] 앞사람 감지: '{nickname}' at {check_xy} -> F7")
     macro._arduino_send(f'KP,{win32con.VK_F7}')
-    return True
+    return "haste"
 
 
 # ── Exchange 루프 ──────────────────────────────────────────────────────────────
@@ -230,6 +275,10 @@ def exchange_loop():
     _last_status_print_time = 0
     _last_potion_idx_time: dict = {}
     _last_haste_check_time = 0
+    _last_return_check_time = 0.0
+    base_shop_direction = macro.high_count_direction
+    shop_direction = base_shop_direction
+    was_low_mp = False
     clients_snapshot = []
     prev_stage = None
     direction_synced = False
@@ -247,12 +296,16 @@ def exchange_loop():
             if not direction_synced:
                 if macro.sync_direction(force=True):
                     print(f"[server] 시작 방향 동기화: {macro.current_direction}")
+                if macro.turn_to(shop_direction):
+                    print(f"[server] 장사 방향 설정: {shop_direction}")
                 direction_synced = True
 
             img = macro.screenshot(hwnd=macro.lineage1_hwnd)
             _mp1 = macro.readMp(img)
             if _mp1 is not None:
                 macro.mp_1 = _mp1
+            else:
+                macro.press_ctrl_a_for_mp_retry()
 
             with _clients_lock:
                 for e in _clients:
@@ -273,22 +326,40 @@ def exchange_loop():
                         macro.force_set_foreground_window(macro.lineage1_hwnd)
 
             total_count = sum(e["available"] for e in clients_snapshot)
-            low_mp_clients = [e for e in clients_snapshot if e["available"] <= LOW_MP_AVAILABLE_THRESHOLD]
             should_face_low = total_count < macro.direction_threshold
             if time.time() - _last_status_print_time >= 3:
                 for e in clients_snapshot:
                     print(f"idx({e['idx']}): MP: {e['mp']}, 잔여: {e['available']}")
-                print(f"총 {total_count} / 저MP idx {[e['idx'] for e in low_mp_clients]}")
+                status_xy = macro.get_configured_mouse_xy("server_mouse_x_y", direction=shop_direction)
+                print(f"[server] 현재 방향: {shop_direction}, 좌표: {status_xy}")
                 _last_status_print_time = time.time()
 
             if should_face_low:
+                was_low_mp = True
                 if macro.turn_to(macro.low_count_direction):
                     print(f"[server] 저MP 감지 -> {macro.low_count_direction}")
+                # if time.time() - _last_type_string_time >= 10:
+                #     macro.arduino_type_string("MP회복중입니다.")
+                    _last_type_string_time = time.time()
                 time.sleep(0.5)
                 continue
             else:
-                if macro.turn_to(macro.high_count_direction):
-                    print(f"[server] 정상 복귀 -> {macro.high_count_direction}")
+                if was_low_mp:
+                    recover_direction = macro.high_count_direction
+                    recover_check_xy, _, recover_nicknames = _load_haste_check_config(recover_direction)
+                    recover_nickname = _read_nickname_at_xy(recover_check_xy)
+                    if recover_nickname in recover_nicknames:
+                        print(f"[server] MP 회복 후 방향 전환 보류: '{recover_nickname}' at {recover_check_xy} -> {recover_direction} 차단")
+                        time.sleep(0.5)
+                        continue
+
+                    shop_direction = recover_direction
+                    print(f"[server] MP 회복 후 방향 전환 허용: 지정 닉네임 없음('{recover_nickname}') at {recover_check_xy} -> {shop_direction}")
+                    was_low_mp = False
+
+                if macro.turn_to(shop_direction):
+                    print(f"[server] 장사 방향 유지 -> {shop_direction}")
+                    img = macro.screenshot(hwnd=macro.lineage1_hwnd)
 
             if time.time() - _last_type_string_time >= 10:
                 _ad_formats = [
@@ -297,17 +368,46 @@ def exchange_loop():
                 macro.arduino_type_string(random.choice(_ad_formats))
                 _last_type_string_time = time.time()
 
+            haste_check_xy, haste_check_interval, direction_change_nicknames = _load_haste_check_config(shop_direction)
+
             nickname = macro.readExchangeNickname(img=img)
             if nickname:
+                if nickname in direction_change_nicknames:
+                    print(f"[server] 지정 닉네임 거래창 감지: '{nickname}' -> ESC")
+                    macro.key_press(win32con.VK_ESCAPE)
+                    time.sleep(0.5)
+                    continue
+
                 greeted_nickname = nickname
                 # macro.arduino_type_string(f"\\f2{greeted_nickname}\\f7님 어서오세요!")
                 stage = READ_ADENA
                 continue
 
-            haste_check_xy, haste_check_interval = _load_haste_check_config()
+            if (
+                shop_direction != base_shop_direction
+                and time.time() - _last_return_check_time >= DIRECTION_RETURN_CHECK_INTERVAL
+            ):
+                _last_return_check_time = time.time()
+                base_check_xy = macro.get_configured_mouse_xy("server_mouse_x_y", direction=shop_direction)
+                base_nickname = _read_nickname_at_xy(base_check_xy)
+
+                if base_nickname in direction_change_nicknames:
+                    print(f"[server] 원래 자리 확인: '{base_nickname}' 감지 at {base_check_xy} -> {shop_direction} 유지")
+                    time.sleep(0.5)
+                    continue
+
+                print(f"[server] 원래 자리 확인: 지정 닉네임 없음('{base_nickname}') at {base_check_xy} -> {shop_direction} 유지")
+                time.sleep(0.5)
+                continue
+
             if time.time() - _last_haste_check_time >= haste_check_interval:
                 _last_haste_check_time = time.time()
-                if _try_haste_front_person(haste_check_xy):
+                haste_result = _try_haste_front_person(haste_check_xy, direction_change_nicknames)
+                if haste_result and haste_result != "haste":
+                    shop_direction = haste_result
+                    _last_return_check_time = time.time()
+                    print(f"[server] 장사 방향 변경: {shop_direction}")
+                if haste_result:
                     time.sleep(0.5)
                     continue
 
@@ -315,8 +415,16 @@ def exchange_loop():
 
         # ── Stage 2: 교환 전 아데나 1회 측정 ────────────────────────────────
         elif stage == READ_ADENA:
-            if not macro.readExchangeNickname(img):
+            exchange_nickname = macro.readExchangeNickname(img)
+            if not exchange_nickname:
                 stage = WAIT_NICKNAME
+                continue
+            _, _, direction_change_nicknames = _load_haste_check_config(shop_direction)
+            if exchange_nickname in direction_change_nicknames:
+                print(f"[server] 지정 닉네임 거래신청 차단: '{exchange_nickname}' -> ESC")
+                macro.key_press(win32con.VK_ESCAPE)
+                stage = WAIT_NICKNAME
+                time.sleep(0.5)
                 continue
             adena_before = macro.readAdena()
             macro._arduino_send(f'KP,{win32con.VK_F7}')
@@ -341,16 +449,27 @@ def exchange_loop():
 
         # ── Stage 4: 받은 아데나 계산 → 서버/클라이언트 픽업 분배 ──────────
         elif stage == PICKUP:
-            if not brightness_changed:
+            adena_after = _read_adena_after_exchange(adena_before)
+            if adena_before is None or adena_after is None:
+                print(f"[server] 아데나 읽기 실패: before={adena_before}, after={adena_after}")
                 stage = WAIT_NICKNAME
                 greeted_nickname = None
                 adena_before = None
                 prev_brightness = None
                 brightness_changed = False
                 continue
-            adena_after = macro.readAdena()
-            print(f"[server] 아데나 변화 감지: {adena_before} → {adena_after}")
+
+            print(f"[server] 아데나 변화 감지: {adena_before} → {adena_after} (slot_changed={brightness_changed})")
             received = adena_after - adena_before
+            if received <= 0:
+                print(f"[server] 아데나 증가 없음: received={received}")
+                stage = WAIT_NICKNAME
+                greeted_nickname = None
+                adena_before = None
+                prev_brightness = None
+                brightness_changed = False
+                continue
+
             pickup_count = int(received // macro.adena_per_pickup)
 
             # 핑 스레드의 concurrent 업데이트와 격리하기 위해 available을 별도 dict로 복사
@@ -389,11 +508,11 @@ def exchange_loop():
 
                     if "conn" not in c:
                         print(f"[서버 픽업 실행] - (남은 픽업: {remaining})")
-                        macro.pickup_lineage1(target_nickname=greeted_nickname)
+                        macro.pickup_lineage1(target_nickname=greeted_nickname, direction=shop_direction)
                         ok = True
                     else:
                         print(f"[서버 → 클라이언트 픽업] idx: {c['idx']} - (남은 픽업: {remaining})")
-                        ok = _send_pickup(c, nickname=greeted_nickname)
+                        ok = _send_pickup(c, nickname=greeted_nickname, direction=shop_direction)
 
                     last_idx_time[c["idx"]] = time.time()
                     if ok:
@@ -409,8 +528,10 @@ def exchange_loop():
             if win32gui.GetForegroundWindow() != macro.lineage1_hwnd:
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
             time.sleep(0.1)
-            # if received > 0:
-            #     # macro.arduino_type_string(f"\\f2{greeted_nickname}\\f7님 감사합니다!")
+            if received > 0:
+                macro.arduino_type_string(f"감사합니다!")
+                _last_type_string_time = time.time()
+                time.sleep(2.5)
 
             stage = WAIT_NICKNAME
             greeted_nickname = None
@@ -458,6 +579,6 @@ if __name__ == "__main__":
             with _clients_lock:
                 target = next((c for c in _clients if c.get("idx") == 1 and "conn" in c), None)
             if target:
-                _send_pickup(target)
+                _send_pickup(target, direction=macro.current_direction)
             else:
                 print("[server] idx=1 클라이언트 없음")

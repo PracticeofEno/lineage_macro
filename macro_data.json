@@ -1,22 +1,48 @@
 {
-    "server_mouse_x_y": [
-        615,
-        360
-    ],
-    "client_mouse_x_y": [
-        575,
-        340
-    ],
+    "server_mouse_x_y": [685, 406],
+    "server_mouse_x_y_by_direction": {
+        "north": [650, 350],
+        "northeast": [690, 375],
+        "east": [730, 400],
+        "southeast": [690, 425],
+        "south": [650, 450],
+        "southwest": [610, 425],
+        "west": [570, 400],
+        "northwest": [610, 375]
+    },
+    "client_mouse_x_y": [725, 426],
+    "client_mouse_x_y_by_direction": {
+        "north": [690, 375],
+        "northeast": [730, 400],
+        "east": [765, 395],
+        "southeast": [725, 426],
+        "south": [690, 430],
+        "southwest": [650, 450],
+        "west": [610, 425],
+        "northwest": [725, 426]
+    },
     "client_numbering_mouse_x_y": [
         1359,
         314
     ],
+    "client_numbering_mouse_x_y_by_direction": {
+        "north": [1359, 314],
+        "northeast": [1359, 314],
+        "east": [1359, 314],
+        "southeast": [1359, 314],
+        "south": [1359, 314],
+        "southwest": [1359, 314],
+        "west": [1359, 314],
+        "northwest": [1359, 314]
+    },
     "haste_check_interval_seconds": 3.0,
+    "direction_change_nicknames": ["헤이로집산다", "질서유지", "헤이핫딜맨", "헤이달러맨", "헤이지니맨", "헤이시리맨", "먼골효"],
+    "blocked_turn_directions": ["north", "east", "south", "west"],
     "direction_threshold": 6,
     "adena_per_pickup": 150,
     "current_direction": "north",
-    "low_count_direction": "southeast",
-    "high_count_direction": "northwest",
+    "low_count_direction": "northwest",
+    "high_count_direction": "southeast",
     "turn_north_xy": [
         654,
         292

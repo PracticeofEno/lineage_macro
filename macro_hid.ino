@@ -14,6 +14,8 @@
  *   MM,<x>,<y>      마우스 이동    (절대 좌표)
  *   CL              마우스 좌클릭  (이동 없이 현재 위치에서 클릭)
  *   CR              마우스 우클릭  (이동 없이 현재 위치에서 클릭)
+ *   DD,<x1>,<y1>,<x2>,<y2>  드래그앤드롭 (x1,y1)→(x2,y2)
+ *   RM,<dx>,<dy>    마우스 상대 이동
  *   BS,<n>          백스페이스 n 회
  *   INIT            마우스 커서를 (0,0) 으로 초기화
  *
@@ -30,6 +32,10 @@
 // 마우스 절대 좌표 추적용
 static int curX = 0;
 static int curY = 0;
+
+// 타임아웃: 마지막 명령 수신 시각 (ms)
+static unsigned long lastCmdTime = 0;
+static bool inputsReleased = true;
 
 // ── Windows VK 코드 → Arduino HID 키코드 변환 ──────────────────────────────
 // Arduino Keyboard.h 의 특수키 상수 (Keyboard.h 참고)
@@ -195,6 +201,42 @@ void processCommand(const String &cmd) {
         delay(50);
         Mouse.release(MOUSE_RIGHT);
 
+    // ── 드래그앤드롭 ──
+    } else if (action == "DD") {
+        // DD,x1,y1,x2,y2
+        int c2 = rest.indexOf(',');
+        int x1 = rest.substring(0, c2).toInt();
+        rest   = rest.substring(c2 + 1);
+        int c3 = rest.indexOf(',');
+        int y1 = rest.substring(0, c3).toInt();
+        rest   = rest.substring(c3 + 1);
+        int c4 = rest.indexOf(',');
+        int x2 = rest.substring(0, c4).toInt();
+        int y2 = rest.substring(c4 + 1).toInt();
+        moveTo(x1, y1);
+        delay(50);
+        Mouse.press(MOUSE_LEFT);
+        delay(100);
+        moveTo(x2, y2);
+        delay(50);
+        Mouse.release(MOUSE_LEFT);
+
+    // ── 마우스 상대 이동 ──
+    } else if (action == "RM") {
+        int c2 = rest.indexOf(',');
+        int dx = rest.substring(0, c2).toInt();
+        int dy = rest.substring(c2 + 1).toInt();
+        int steps = max(abs(dx), abs(dy));
+        if (steps == 0) steps = 1;
+        for (int i = 1; i <= steps; i++) {
+            int mx = (int)((long)dx * i / steps) - (int)((long)dx * (i - 1) / steps);
+            int my = (int)((long)dy * i / steps) - (int)((long)dy * (i - 1) / steps);
+            Mouse.move(mx, my, 0);
+            curX += mx;
+            curY += my;
+            if (i < steps) delay(1);
+        }
+
     // ── 커서 초기화 (좌상단 (0,0)) ──
     } else if (action == "INIT") {
         // 충분히 큰 음수로 반복 이동하여 (0,0) 근방으로 강제 이동
@@ -221,6 +263,17 @@ void loop() {
     if (Serial.available() > 0) {
         String line = Serial.readStringUntil('\n');
         line.trim();
+        lastCmdTime = millis();
+        inputsReleased = false;
         processCommand(line);
+    }
+
+    // 3초간 명령이 없으면 눌린 키/버튼 전부 해제 (Python 크래시 등 안전장치)
+    if (!inputsReleased && (millis() - lastCmdTime > 3000)) {
+        Keyboard.releaseAll();
+        Mouse.release(MOUSE_LEFT);
+        Mouse.release(MOUSE_RIGHT);
+        Mouse.release(MOUSE_MIDDLE);
+        inputsReleased = true;
     }
 }

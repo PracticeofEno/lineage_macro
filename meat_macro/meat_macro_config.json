@@ -1,0 +1,129 @@
+{
+  "proxy_host": "127.0.0.1",
+  "proxy_port": 9998,
+  "cycle_interval_seconds": 1800.0,
+  "pre_drag_delay_seconds": 0.05,
+  "post_drag_delay_seconds": 0.05,
+  "between_action_delay_seconds": 0.15,
+  "between_window_delay_seconds": 0.3,
+  "targets": {
+    "server": {
+      "window_title_prefix": "server",
+      "start_screen_pos": [
+        1200,
+        220
+      ],
+      "end_screen_positions": [
+        [
+          730,
+          400
+        ],
+        [
+          690,
+          425
+        ],
+        [
+          650,
+          450
+        ],
+        [
+          570,
+          400
+        ]
+      ],
+      "direction_screen_positions": [
+        [
+          650,
+          350
+        ],
+        [
+          690,
+          375
+        ],
+        [
+          730,
+          400
+        ],
+        [
+          690,
+          425
+        ],
+        [
+          650,
+          450
+        ],
+        [
+          610,
+          425
+        ],
+        [
+          570,
+          400
+        ],
+        [
+          610,
+          375
+        ]
+      ]
+    },
+    "client": {
+      "window_title_prefix": "client",
+      "start_screen_pos": [
+        1200,
+        220
+      ],
+      "end_screen_positions": [
+        [
+          610,
+          375
+        ],
+        [
+          650,
+          350
+        ],
+        [
+          690,
+          375
+        ],
+        [
+          730,
+          400
+        ]
+      ],
+      "direction_screen_positions": [
+        [
+          650,
+          350
+        ],
+        [
+          690,
+          375
+        ],
+        [
+          730,
+          400
+        ],
+        [
+          690,
+          425
+        ],
+        [
+          650,
+          450
+        ],
+        [
+          610,
+          425
+        ],
+        [
+          570,
+          400
+        ],
+        [
+          610,
+          375
+        ]
+      ]
+    }
+  }
+}

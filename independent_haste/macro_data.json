@@ -114,7 +114,6 @@
         ]
     },
     "haste_check_interval_seconds": 3.0,
-    "exchange_pixel_check_xy": [848, 877],
     "direction_change_nicknames": [
         "질서유지",
         "핑진시",
@@ -122,13 +121,9 @@
         "가게여직원",
         "빨강농장",
         "보라농장",
-        "연변개법사",
-        "AUDENA",
-        "밥풀",
-        "수호검",
-        "댕댕아",
-        "까미오",
-        "바티칸전사"
+        "좋아해",
+        "블랙킹",
+        "션샤크"
     ],
     "blocked_turn_directions": [
         "north",

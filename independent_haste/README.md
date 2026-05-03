@@ -69,14 +69,7 @@ independent_haste_config.json
 
 좌표, 방향, 가격 설정은 이 폴더 안의 `macro_data.json`에서 바꿉니다.
 
-교환 OK 전 픽셀 확인 좌표도 `macro_data.json`에서 바꿉니다.
-
-```json
-"exchange_pixel_check_xy": [848, 877]
-```
-
-교환창 슬롯 밝기가 120을 넘었을 때 이 좌표의 픽셀이 먼저 바뀌어 있어야 교환을 OK합니다.
-픽셀이 바뀌지 않았으면 ESC로 거래를 취소합니다.
+교환창은 픽셀 변화 확인 없이 슬롯 밝기가 120을 넘으면 OK합니다.
 
 ## 실행 명령 확인
 

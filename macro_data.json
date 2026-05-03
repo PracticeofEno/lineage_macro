@@ -36,7 +36,10 @@
         "northwest": [1359, 314]
     },
     "haste_check_interval_seconds": 3.0,
-    "exchange_pixel_check_xy": [82, 567],
+    "same_front_nickname_chat_seconds": 60.0,
+    "same_front_nickname_chat_client_idx": 1,
+    "same_front_nickname_chat_cooldown_seconds": 60.0,
+    "same_front_nickname_client_message": "\"헤이로집산다\" {nickname} 꼬장 알림",
     "direction_change_nicknames": [],
     "blocked_turn_directions": ["north", "east", "south", "west"],
     "direction_threshold": 6,

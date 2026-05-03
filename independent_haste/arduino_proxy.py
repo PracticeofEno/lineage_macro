@@ -10,6 +10,7 @@ import threading
 import serial
 import sys
 
+# Arduino가 잡힌 COM 포트입니다. 장치 관리자에서 포트가 바뀌면 여기만 수정합니다.
 SERIAL_PORT = 'COM11'
 BAUD_RATE   = 115200
 PROXY_HOST  = '127.0.0.1'
@@ -27,6 +28,7 @@ _ser_lock = threading.Lock()
 
 
 def _handle_client(conn: socket.socket, addr: tuple):
+    """Python 매크로가 보낸 한 줄 명령을 Arduino Serial로 전달합니다."""
     print(f"[proxy] 클라이언트 연결: {addr}")
     buf = b''
     try:

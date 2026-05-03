@@ -1,5 +1,6 @@
 import argparse
 from contextlib import contextmanager
+import errno
 import json
 import msvcrt
 import os
@@ -14,22 +15,46 @@ import win32con
 import macro
 
 
+# 이 파일은 독립 헤이스트 매크로의 메인 실행 파일입니다.
+# 인자 없이 실행하면 q/1/2 명령 컨트롤러가 열리고,
+# 내부적으로 server/client 역할 프로세스를 각각 띄워 독립적으로 돌립니다.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MACRO_DATA_PATH = os.path.join(BASE_DIR, "macro_data.json")
 INDEPENDENT_HASTE_CONFIG_PATH = os.path.join(BASE_DIR, "independent_haste_config.json")
 INPUT_LOCK_PATH = os.path.join(BASE_DIR, ".independent_haste.lock")
 
+# 자주 바꾸는 운영 기준값입니다. 좌표/방향/가격은 macro_data.json에서 관리합니다.
+# 헤이스트 가능 횟수(current_available)가 이 값 이하이면 MP 포션(F8)을 사용합니다.
 LOW_MP_AVAILABLE_THRESHOLD = 4
+
+# MP 포션을 한 번 사용한 뒤 다시 사용할 수 있을 때까지 기다리는 시간(초)입니다.
 POTION_COOLDOWN_SECONDS = 600.0
+
+# macro_data.json에 haste_check_interval_seconds가 없거나 잘못됐을 때 쓰는 기본 검사 간격(초)입니다.
 HASTE_CHECK_DEFAULT_INTERVAL = 3.0
+
+# 기본 장사 방향이 아닌 방향에 있을 때 자리 확인을 다시 시도하는 간격(초)입니다.
 DIRECTION_RETURN_CHECK_INTERVAL = 30.0
+
+# 교환창 슬롯 영역 평균 밝기가 이 값보다 크면 교환 OK 후보로 판단합니다.
 EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD = 120.0
-EXCHANGE_PIXEL_CHANGE_DEFAULT_XY = (848, 877)
+
+# 픽업을 연속으로 여러 번 할 때 같은 창에서 다음 픽업까지 기다리는 최소 시간(초)입니다.
 SAME_PICKUP_DELAY_SECONDS = 1.0
+
+# independent_haste_config.json에 same_nickname_turn_seconds가 없을 때의 기본값입니다. 0이면 비활성화입니다.
 SAME_NICKNAME_TURN_DEFAULT_SECONDS = 0.0
+
+# 상태 로그를 몇 초마다 출력할지 정하는 기본값입니다.
 STATUS_INTERVAL_DEFAULT_SECONDS = 3.0
+
+# q/1/2 컨트롤러에서 server 실행 후 client를 띄우기 전 기다리는 기본 시간(초)입니다.
 DUAL_START_DELAY_DEFAULT_SECONDS = 2.0
 
+# server/client가 동시에 입력하려 할 때 파일 락을 다시 잡아보는 간격(초)입니다.
+INPUT_LOCK_RETRY_INTERVAL_SECONDS = 0.05
+
+# 방향전환 후보로 사용하는 8방향 이름입니다. macro_data.json의 방향별 좌표 키와 맞아야 합니다.
 TURN_DIRECTIONS = (
     "north",
     "northeast",
@@ -43,11 +68,13 @@ TURN_DIRECTIONS = (
 
 
 def load_macro_data() -> dict:
+    """좌표, 방향, 가격, 차단 닉네임 같은 매크로 공통 설정을 읽습니다."""
     with open(MACRO_DATA_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
 def write_macro_data(data: dict) -> None:
+    """자동 추가된 direction_change_nicknames를 안전하게 파일에 저장합니다."""
     tmp_path = f"{MACRO_DATA_PATH}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
@@ -56,6 +83,7 @@ def write_macro_data(data: dict) -> None:
 
 
 def load_independent_haste_config() -> dict:
+    """독립 실행 전용 설정을 읽습니다. 파일이 없거나 깨졌으면 기본값을 씁니다."""
     if not os.path.exists(INDEPENDENT_HASTE_CONFIG_PATH):
         return {}
 
@@ -73,6 +101,7 @@ def load_independent_haste_config() -> dict:
 
 
 def normalize_nickname_list(raw_nicknames) -> list[str]:
+    """닉네임 설정을 중복 없는 문자열 리스트로 정리합니다."""
     if isinstance(raw_nicknames, str):
         nicknames = [raw_nicknames]
     elif isinstance(raw_nicknames, (list, tuple, set)):
@@ -96,6 +125,7 @@ def read_direction_change_nicknames(data: dict) -> set[str]:
 
 
 def add_direction_change_nickname(nickname: str) -> bool:
+    """오래 서 있던 닉네임을 direction_change_nicknames에 즉시 추가합니다."""
     nickname = str(nickname).strip()
     if not nickname:
         return False
@@ -112,22 +142,6 @@ def add_direction_change_nickname(nickname: str) -> bool:
         data["direction_change_nicknames"] = nicknames
         write_macro_data(data)
     return True
-
-
-def read_exchange_pixel_check_xy(data: dict) -> tuple[int, int] | None:
-    value = data.get("exchange_pixel_check_xy", EXCHANGE_PIXEL_CHANGE_DEFAULT_XY)
-    if value is None or value is False:
-        return None
-    if isinstance(value, (list, tuple)) and len(value) >= 2:
-        return int(value[0]), int(value[1])
-    raise RuntimeError(f"invalid exchange_pixel_check_xy: {value!r}")
-
-
-def read_exchange_check_pixel(img, xy: tuple[int, int] | None) -> tuple[int, int, int] | None:
-    if xy is None:
-        return None
-    pixel = img.getpixel(xy)
-    return tuple(int(value) for value in pixel[:3])
 
 
 def read_blocked_turn_directions(data: dict) -> set[str]:
@@ -172,6 +186,7 @@ def get_python_executable(data: dict) -> str:
 
 
 def build_role_command(role: str, args: argparse.Namespace, config: dict) -> list[str]:
+    """컨트롤러가 server/client 자식 프로세스를 띄울 때 쓰는 명령을 만듭니다."""
     command = [
         get_python_executable(config),
         "-u",
@@ -195,6 +210,7 @@ def build_proxy_command(config: dict) -> list[str]:
 
 
 def stream_process_output(label: str, process: subprocess.Popen) -> None:
+    """server/client 자식 프로세스 로그를 현재 콘솔에 prefix를 붙여 출력합니다."""
     if process.stdout is None:
         return
 
@@ -205,6 +221,7 @@ def stream_process_output(label: str, process: subprocess.Popen) -> None:
 
 
 def launch_child_process(label: str, command: list[str], dry_run: bool) -> subprocess.Popen | None:
+    """새 콘솔을 만들지 않고 자식 프로세스를 실행해서 로그를 현재 콘솔로 모읍니다."""
     display = subprocess.list2cmdline(command)
     if dry_run:
         print(f"[dry-run] {label}: {display}")
@@ -231,6 +248,7 @@ def launch_child_process(label: str, command: list[str], dry_run: bool) -> subpr
 
 
 def stop_child_processes(processes: list[tuple[str, subprocess.Popen]]) -> None:
+    """q/2/Ctrl+C 입력 시 server/client/proxy 프로세스를 정리합니다."""
     for label, process in processes:
         if process.poll() is None:
             print(f"[launcher] stopping {label}")
@@ -264,6 +282,7 @@ def start_independent_processes(
     config: dict,
     processes: dict[str, subprocess.Popen | None],
 ) -> None:
+    """명령어 1 입력 시 server/client 독립 매크로를 시작합니다."""
     if is_process_alive(processes.get("server")) or is_process_alive(processes.get("client")):
         print("[independent] 이미 실행 중입니다.")
         return
@@ -281,6 +300,7 @@ def start_independent_processes(
 
 
 def stop_independent_processes(processes: dict[str, subprocess.Popen | None]) -> None:
+    """명령어 2 입력 시 server/client 독립 매크로만 중지합니다."""
     targets = [
         (label, process)
         for label, process in processes.items()
@@ -297,6 +317,7 @@ def stop_independent_processes(processes: dict[str, subprocess.Popen | None]) ->
 
 
 def run_command_controller(args: argparse.Namespace, config: dict) -> int:
+    """기존 server.py처럼 q/1/2 명령으로 독립 매크로를 제어하는 진입점입니다."""
     if args.dry_run:
         launch_child_process("server", build_role_command("server", args, config), True)
         launch_child_process("client", build_role_command("client", args, config), True)
@@ -336,21 +357,33 @@ def run_command_controller(args: argparse.Namespace, config: dict) -> int:
 
 @contextmanager
 def input_lock():
+    """두 프로세스가 동시에 마우스/키보드/파일 입력을 건드리지 않게 잠급니다."""
     with open(INPUT_LOCK_PATH, "a+b") as lock_file:
-        lock_file.seek(0)
-        msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+        lock_file.seek(0, os.SEEK_END)
+        if lock_file.tell() == 0:
+            lock_file.write(b"\0")
+            lock_file.flush()
+
+        acquired = False
+        while not acquired:
+            lock_file.seek(0)
+            try:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                acquired = True
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EDEADLK):
+                    raise
+                time.sleep(INPUT_LOCK_RETRY_INTERVAL_SECONDS)
         try:
-            lock_file.seek(0, os.SEEK_END)
-            if lock_file.tell() == 0:
-                lock_file.write(b"\0")
-                lock_file.flush()
             yield
         finally:
-            lock_file.seek(0)
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            if acquired:
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def clear_chat_input() -> None:
+    """우클릭 닉네임 확인 후 채팅 입력칸에 남은 글자를 지웁니다."""
     macro.arduino_key_down(win32con.VK_CONTROL)
     macro.arduino_key_press(win32con.VK_BACK)
     macro.arduino_key_up(win32con.VK_CONTROL)
@@ -358,6 +391,7 @@ def clear_chat_input() -> None:
 
 
 def read_nickname_at_xy(check_xy: tuple[int, int]) -> str:
+    """지정 좌표를 우클릭해서 입력창에 잡힌 닉네임을 OCR로 읽습니다."""
     x, y = check_xy
     with input_lock():
         macro.force_set_foreground_window(macro.lineage1_hwnd)
@@ -370,6 +404,7 @@ def read_nickname_at_xy(check_xy: tuple[int, int]) -> str:
 
 
 def read_adena_after_exchange(adena_before: int | None, timeout: float = 6.0) -> int | None:
+    """교환 완료 후 아데나가 실제로 증가했는지 여러 번 재확인합니다."""
     deadline = time.time() + timeout
     last_value = None
 
@@ -389,6 +424,8 @@ def read_adena_after_exchange(adena_before: int | None, timeout: float = 6.0) ->
 
 
 class IndependentHasteMacro:
+    """server 또는 client 한 창을 독립적으로 담당하는 상태 머신입니다."""
+
     def __init__(self, role: str, status_interval: float, same_nickname_turn_seconds: float):
         self.role = role
         self.status_interval = status_interval
@@ -410,9 +447,6 @@ class IndependentHasteMacro:
         self.adena_before: int | None = None
         self.prev_brightness: float | None = None
         self.brightness_changed = False
-        self.exchange_pixel_xy: tuple[int, int] | None = None
-        self.exchange_pixel_before: tuple[int, int, int] | None = None
-        self.exchange_pixel_changed = False
         self.same_nickname: str | None = None
         self.same_nickname_xy: tuple[int, int] | None = None
         self.same_nickname_since = 0.0
@@ -421,6 +455,7 @@ class IndependentHasteMacro:
         self.img = None
 
     def load_haste_config(self, direction: str) -> tuple[tuple[int, int], float, set[str]]:
+        """현재 방향 기준 확인 좌표와 차단 닉네임 목록을 최신 설정에서 읽습니다."""
         data = load_macro_data()
         xy = macro.get_configured_mouse_xy(direction=direction)
 
@@ -437,6 +472,7 @@ class IndependentHasteMacro:
         exclude_current: bool,
         label: str,
     ) -> str | None:
+        """방향전환 후보를 만들고, 각 방향 좌표에 차단 닉네임이 없는 곳을 고릅니다."""
         data = load_macro_data()
         direction_change_nicknames = read_direction_change_nicknames(data)
         blocked_directions = read_blocked_turn_directions(data)
@@ -474,6 +510,7 @@ class IndependentHasteMacro:
         return None
 
     def turn_to(self, direction: str, *, force: bool = False) -> bool:
+        """실제 캐릭터 방향전환은 macro.py에 맡기고 입력 충돌만 여기서 막습니다."""
         with input_lock():
             return macro.turn_to(direction, force=force)
 
@@ -492,17 +529,8 @@ class IndependentHasteMacro:
             macro.force_set_foreground_window(macro.lineage1_hwnd)
             macro._arduino_send(f"KP,{win32con.VK_F7}")
 
-    def cancel_exchange(self, label: str, chat_message: str | None = None) -> None:
-        print(f"[{self.role}] {label} -> ESC")
-        self.key_press(win32con.VK_ESCAPE)
-        if chat_message:
-            time.sleep(0.2)
-            self.type_string(chat_message)
-            self.last_type_string_time = time.time()
-        self.reset_trade_state()
-        time.sleep(0.5)
-
     def use_potion_if_needed(self) -> None:
+        """헤이스트 가능 횟수가 낮으면 F8 포션을 사용합니다. 쿨타임은 10분입니다."""
         if self.current_available > LOW_MP_AVAILABLE_THRESHOLD:
             return
         now = time.time()
@@ -515,6 +543,7 @@ class IndependentHasteMacro:
         print(f"[{self.role}] potion used")
 
     def update_mp(self) -> None:
+        """현재 창 스크린샷에서 MP를 읽고, MP/20으로 가능한 헤이스트 횟수를 계산합니다."""
         self.img = macro.screenshot(hwnd=macro.lineage1_hwnd)
         mp = macro.readMp(self.img)
         if mp is None:
@@ -544,6 +573,7 @@ class IndependentHasteMacro:
         self.same_nickname_since = 0.0
 
     def update_same_nickname_tracking(self, nickname: str, check_xy: tuple[int, int]) -> float:
+        """같은 좌표에 같은 닉네임이 얼마나 오래 유지되는지 누적합니다."""
         now = time.time()
         if not nickname:
             self.reset_same_nickname_tracking()
@@ -562,6 +592,7 @@ class IndependentHasteMacro:
         self.exchange_window_since = 0.0
 
     def update_exchange_window_tracking(self, nickname: str) -> float:
+        """같은 거래창 닉네임이 얼마나 오래 열려 있는지 누적합니다."""
         now = time.time()
         if not nickname:
             self.reset_exchange_window_tracking()
@@ -575,6 +606,7 @@ class IndependentHasteMacro:
         return 0.0
 
     def cancel_exchange_and_turn(self, label: str) -> None:
+        """문제 있는 거래창을 닫고 다른 장사 방향을 찾습니다."""
         print(f"[{self.role}] {label} -> ESC")
         self.key_press(win32con.VK_ESCAPE)
         time.sleep(0.2)
@@ -595,6 +627,7 @@ class IndependentHasteMacro:
         time.sleep(0.5)
 
     def handle_exchange_window_timeout(self, nickname: str) -> bool:
+        """거래창이 오래 열려 있으면 닉네임을 자동 차단 목록에 넣고 방향전환합니다."""
         if self.same_nickname_turn_seconds <= 0:
             return False
 
@@ -611,6 +644,7 @@ class IndependentHasteMacro:
         return True
 
     def handle_low_mp(self) -> bool:
+        """MP가 부족하면 low_count_direction으로 돌고 마나회복 안내를 출력합니다."""
         should_face_low = self.current_available < macro.direction_threshold
         if not should_face_low:
             return False
@@ -630,6 +664,7 @@ class IndependentHasteMacro:
         return True
 
     def recover_from_low_mp_if_needed(self) -> bool:
+        """MP 부족 상태에서 회복되면 high_count_direction 우선으로 장사 방향을 다시 잡습니다."""
         if not self.was_low_mp:
             return True
 
@@ -647,6 +682,7 @@ class IndependentHasteMacro:
         return True
 
     def try_haste_front_person(self, check_xy: tuple[int, int], direction_change_nicknames: set[str]) -> str | None:
+        """앞 사람 닉네임을 읽고, 차단/장기정체/정상 헤이스트 여부를 판단합니다."""
         nickname = read_nickname_at_xy(check_xy)
         if not nickname:
             print(f"[{self.role}] no front nickname at {check_xy}")
@@ -694,6 +730,7 @@ class IndependentHasteMacro:
         return "haste"
 
     def handle_wait_stage(self) -> None:
+        """기본 대기 단계: MP 확인, 방향 유지, 광고, 거래창/앞사람 확인을 처리합니다."""
         if not self.direction_synced:
             self.turn_to(macro.current_direction, force=True)
             if self.turn_to(self.shop_direction):
@@ -763,6 +800,7 @@ class IndependentHasteMacro:
         time.sleep(0.5)
 
     def handle_read_adena_stage(self) -> None:
+        """거래 시작 직전 아데나와 픽셀 기준값을 저장하고 F7로 수락 준비를 합니다."""
         self.img = macro.screenshot(hwnd=macro.lineage1_hwnd)
         exchange_nickname = macro.readExchangeNickname(img=self.img)
         if not exchange_nickname:
@@ -784,18 +822,11 @@ class IndependentHasteMacro:
 
         with input_lock():
             self.adena_before = macro.readAdena()
-        self.exchange_pixel_xy = read_exchange_pixel_check_xy(load_macro_data())
-        self.exchange_pixel_before = read_exchange_check_pixel(self.img, self.exchange_pixel_xy)
-        self.exchange_pixel_changed = False
-        if self.exchange_pixel_xy is not None:
-            print(
-                f"[{self.role}] exchange check pixel baseline: "
-                f"xy={self.exchange_pixel_xy}, rgb={self.exchange_pixel_before}"
-            )
         self.press_f7()
         self.stage = "monitor_brightness"
 
     def handle_monitor_brightness_stage(self) -> None:
+        """픽셀 변화와 슬롯 밝기를 함께 확인해 교환 OK 또는 ESC 취소를 결정합니다."""
         self.img = macro.screenshot()
         exchange_nickname = macro.readExchangeNickname(self.img)
         if not exchange_nickname:
@@ -810,28 +841,7 @@ class IndependentHasteMacro:
         brightness = macro.get_brightness(slot)
         print(f"[{self.role}] slot brightness={brightness:.2f}")
 
-        if (
-            self.exchange_pixel_xy is not None
-            and self.exchange_pixel_before is not None
-            and not self.exchange_pixel_changed
-        ):
-            current_pixel = read_exchange_check_pixel(self.img, self.exchange_pixel_xy)
-            self.exchange_pixel_changed = current_pixel != self.exchange_pixel_before
-            if self.exchange_pixel_changed:
-                print(
-                    f"[{self.role}] exchange check pixel changed: "
-                    f"xy={self.exchange_pixel_xy}, {self.exchange_pixel_before} -> {current_pixel}"
-                )
-
         if not self.brightness_changed and brightness > EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD:
-            if self.exchange_pixel_xy is not None and not self.exchange_pixel_changed:
-                self.cancel_exchange(
-                    f"slot brightness {brightness:.2f} > {EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD:.1f}, "
-                    "exchange check pixel unchanged",
-                    chat_message="거래가 취소되었습니다",
-                )
-                return
-
             self.brightness_changed = True
             with input_lock():
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
@@ -840,17 +850,16 @@ class IndependentHasteMacro:
         time.sleep(0.5)
 
     def reset_trade_state(self) -> None:
+        """한 번의 거래 흐름이 끝났거나 취소됐을 때 임시 상태를 초기화합니다."""
         self.stage = "wait"
         self.greeted_nickname = None
         self.adena_before = None
         self.prev_brightness = None
         self.brightness_changed = False
-        self.exchange_pixel_xy = None
-        self.exchange_pixel_before = None
-        self.exchange_pixel_changed = False
         self.reset_exchange_window_tracking()
 
     def handle_pickup_stage(self) -> None:
+        """받은 아데나를 방 수로 계산하고 자기 창 기준으로 픽업을 수행합니다."""
         adena_after = read_adena_after_exchange(self.adena_before)
         if self.adena_before is None or adena_after is None:
             print(f"[{self.role}] adena read failed: before={self.adena_before}, after={adena_after}")
@@ -863,6 +872,9 @@ class IndependentHasteMacro:
             f"(received={received}, slot_changed={self.brightness_changed})"
         )
         if received <= 0:
+            self.type_string("아데나를 받지 못 했습니다. 다시 부탁드리겠습니다.")
+            self.last_type_string_time = time.time()
+            time.sleep(1.0)
             self.reset_trade_state()
             return
 
@@ -892,6 +904,7 @@ class IndependentHasteMacro:
         self.reset_trade_state()
 
     def run(self) -> None:
+        """현재 stage 값에 맞는 처리 함수를 계속 호출합니다."""
         while True:
             if self.stage == "wait":
                 self.handle_wait_stage()

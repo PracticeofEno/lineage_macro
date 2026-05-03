@@ -76,6 +76,15 @@ def _handle_command(msg: dict) -> dict | None:
         macro.use_potion()
         return {"status": "ok"}
 
+    if cmd == "chat":
+        message = str(msg.get("message", "")).strip()
+        if not message:
+            return {"status": "ok"}
+        print(f"[client] 채팅 명령 수신: {message}")
+        macro.force_set_foreground_window(macro.lineage1_hwnd)
+        macro.arduino_type_string(message)
+        return {"status": "ok"}
+
     print(f"[client] 알 수 없는 명령: {msg}")
     return None
 

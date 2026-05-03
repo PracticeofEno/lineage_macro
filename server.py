@@ -20,13 +20,17 @@ import macro
 HOST = '0.0.0.0'
 PORT = 9999
 ACK_TIMEOUT = 10      # 픽업 ack 대기 최대 시간(초)
-SAME_UNIT_DELAY = 1   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
+SAME_UNIT_DELAY = 0.5   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
 POTION_COOLDOWN = 600 # 포션 쿨타임(초)
 LOW_MP_AVAILABLE_THRESHOLD = 2
 HASTE_CHECK_DEFAULT_INTERVAL = 3.0
+HASTE_AFTER_F7_WAIT_SECONDS = 0.2
+EXCHANGE_MONITOR_INTERVAL_SECONDS = 0.25
+SAME_FRONT_NICKNAME_CHAT_DEFAULT_SECONDS = 60.0
+SAME_FRONT_NICKNAME_CHAT_DEFAULT_COOLDOWN_SECONDS = 60.0
+SHOP_DIRECTION_FORCE_INTERVAL_SECONDS = 30.0
 DIRECTION_RETURN_CHECK_INTERVAL = 30.0
 EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD = 120.0
-EXCHANGE_PIXEL_CHANGE_DEFAULT_XY = (848, 877)
 TURN_DIRECTIONS = (
     "north",
     "northeast",
@@ -76,28 +80,6 @@ def _load_macro_data() -> dict:
     data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
     with open(data_path, encoding="utf-8") as f:
         return json.load(f)
-
-
-def _coerce_exchange_pixel_xy(value) -> tuple[int, int] | None:
-    if value is None:
-        return EXCHANGE_PIXEL_CHANGE_DEFAULT_XY
-    if value is False:
-        return None
-    if isinstance(value, (list, tuple)) and len(value) >= 2:
-        return int(value[0]), int(value[1])
-    raise RuntimeError(f"invalid exchange_pixel_check_xy: {value!r}")
-
-
-def _load_exchange_pixel_check_xy() -> tuple[int, int] | None:
-    data = _load_macro_data()
-    return _coerce_exchange_pixel_xy(data.get("exchange_pixel_check_xy", EXCHANGE_PIXEL_CHANGE_DEFAULT_XY))
-
-
-def _read_exchange_check_pixel(img, xy: tuple[int, int] | None) -> tuple[int, int, int] | None:
-    if xy is None:
-        return None
-    pixel = img.getpixel(xy)
-    return tuple(int(value) for value in pixel[:3])
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -239,6 +221,48 @@ def _send_pickup(client: dict, nickname: str | None = None, direction: str | Non
         return False
 
 
+def _select_chat_client(clients_snapshot: list[dict], preferred_idx: int | None) -> dict | None:
+    connected_clients = [c for c in clients_snapshot if "conn" in c]
+    if not connected_clients:
+        return None
+
+    if preferred_idx is not None:
+        preferred = next((c for c in connected_clients if c.get("idx") == preferred_idx), None)
+        if preferred is not None:
+            return preferred
+
+    return connected_clients[0]
+
+
+def _send_client_chat(client: dict, message: str) -> bool:
+    """특정 클라이언트 창에서 채팅을 입력하도록 명령하고 ack를 기다린다."""
+    if not message or "conn" not in client:
+        return False
+
+    conn = client["conn"]
+    addr = client["addr"]
+    with client["lock"]:
+        if not _send_json(conn, {"cmd": "chat", "message": message}):
+            _remove_client(client)
+            return False
+
+        conn.settimeout(ACK_TIMEOUT)
+        resp = _recv_json(conn)
+        conn.settimeout(None)
+
+        if resp is None:
+            print(f"[server] chat ack 수신 실패 - 클라이언트 제거: {addr}")
+            _remove_client(client)
+            return False
+
+        if resp.get("status") == "ok":
+            print(f"[server] client chat 완료 ack 수신 from {addr}")
+            return True
+
+        print(f"[server] 예상치 못한 chat 응답: {resp}")
+        return False
+
+
 def _load_haste_check_config(direction: str) -> tuple[tuple[int, int], float, set[str]]:
     data = _load_macro_data()
 
@@ -251,6 +275,34 @@ def _load_haste_check_config(direction: str) -> tuple[tuple[int, int], float, se
     direction_change_nicknames = _read_direction_change_nicknames(data)
 
     return xy, interval, direction_change_nicknames
+
+
+def _load_same_front_nickname_chat_config() -> tuple[float, str, int | None, float]:
+    data = _load_macro_data()
+
+    try:
+        seconds = float(data.get("same_front_nickname_chat_seconds", SAME_FRONT_NICKNAME_CHAT_DEFAULT_SECONDS))
+    except (TypeError, ValueError):
+        seconds = SAME_FRONT_NICKNAME_CHAT_DEFAULT_SECONDS
+
+    try:
+        cooldown = float(
+            data.get(
+                "same_front_nickname_chat_cooldown_seconds",
+                SAME_FRONT_NICKNAME_CHAT_DEFAULT_COOLDOWN_SECONDS,
+            )
+        )
+    except (TypeError, ValueError):
+        cooldown = SAME_FRONT_NICKNAME_CHAT_DEFAULT_COOLDOWN_SECONDS
+
+    message = str(data.get("same_front_nickname_client_message", "")).strip()
+    client_idx_raw = data.get("same_front_nickname_chat_client_idx", 1)
+    try:
+        client_idx = int(client_idx_raw)
+    except (TypeError, ValueError):
+        client_idx = None
+
+    return max(0.0, seconds), message, client_idx, max(0.0, cooldown)
 
 
 def _read_adena_after_exchange(adena_before: int | None, timeout: float = 6.0) -> int | None:
@@ -290,23 +342,23 @@ def _read_nickname_at_xy(check_xy: tuple[int, int]) -> str:
     return nickname
 
 
-def _try_haste_front_person(check_xy: tuple[int, int], direction_change_nicknames: set[str]) -> str | None:
+def _try_haste_front_person(check_xy: tuple[int, int], direction_change_nicknames: set[str]) -> tuple[str | None, str]:
     nickname = _read_nickname_at_xy(check_xy)
     if not nickname:
         print(f"[haste] 앞사람 감지 없음 at {check_xy}")
-        return None
+        return None, ""
 
     if nickname in direction_change_nicknames:
         direction = macro.turn_random_excluding(macro.low_count_direction)
         if direction is None:
             print(f"[haste] 지정 닉네임 감지: '{nickname}' at {check_xy} -> 거래신청 안 함, 랜덤 방향 전환 실패")
-            return None
+            return None, nickname
         print(f"[haste] 지정 닉네임 감지: '{nickname}' at {check_xy} -> 거래신청 안 함, {direction} 전환")
-        return direction
+        return direction, nickname
 
     print(f"[haste] 앞사람 감지: '{nickname}' at {check_xy} -> F7")
     macro._arduino_send(f'KP,{win32con.VK_F7}')
-    return "haste"
+    return "haste", nickname
 
 
 def _choose_recovered_shop_direction(preferred_direction: str) -> str | None:
@@ -369,20 +421,91 @@ def exchange_loop():
     adena_before = None
     prev_brightness = None
     brightness_changed = False
-    exchange_pixel_xy: tuple[int, int] | None = None
-    exchange_pixel_before: tuple[int, int, int] | None = None
-    exchange_pixel_changed = False
     _last_type_string_time = 0
     _last_status_print_time = 0
     _last_potion_idx_time: dict = {}
     _last_haste_check_time = 0
     _last_return_check_time = 0.0
+    _last_shop_direction_force_time = time.time()
     base_shop_direction = macro.high_count_direction
     shop_direction = base_shop_direction
     was_low_mp = False
     clients_snapshot = []
     prev_stage = None
     direction_synced = False
+    same_front_nickname = None
+    same_front_xy = None
+    same_front_since = 0.0
+    same_front_last_chat_key = None
+    same_front_last_chat_time = 0.0
+    exchange_window_nickname = None
+    exchange_window_since = 0.0
+    exchange_window_last_chat_key = None
+    exchange_window_last_chat_time = 0.0
+
+    def reset_exchange_window_tracking() -> None:
+        nonlocal exchange_window_nickname, exchange_window_since
+        exchange_window_nickname = None
+        exchange_window_since = 0.0
+
+    def reset_trade_state() -> None:
+        nonlocal stage, greeted_nickname, adena_before, prev_brightness, brightness_changed
+        stage = WAIT_NICKNAME
+        greeted_nickname = None
+        adena_before = None
+        prev_brightness = None
+        brightness_changed = False
+        reset_exchange_window_tracking()
+
+    def handle_exchange_window_timeout(nickname: str) -> bool:
+        nonlocal exchange_window_nickname, exchange_window_since
+        nonlocal exchange_window_last_chat_key, exchange_window_last_chat_time
+
+        if not nickname:
+            reset_exchange_window_tracking()
+            return False
+
+        now = time.time()
+        if exchange_window_nickname == nickname:
+            elapsed = now - exchange_window_since
+        else:
+            exchange_window_nickname = nickname
+            exchange_window_since = now
+            elapsed = 0.0
+
+        chat_seconds, chat_message, chat_client_idx, chat_cooldown = _load_same_front_nickname_chat_config()
+        chat_key = ("exchange", nickname)
+        if (
+            chat_seconds <= 0
+            or not chat_message
+            or elapsed < chat_seconds
+            or (
+                exchange_window_last_chat_key == chat_key
+                and now - exchange_window_last_chat_time < chat_cooldown
+            )
+        ):
+            return False
+
+        try:
+            rendered_message = chat_message.format(nickname=nickname)
+        except (IndexError, KeyError, ValueError):
+            rendered_message = chat_message
+
+        print(f"[server] 거래창 '{nickname}' {elapsed:.1f}초 유지 -> ESC 후 client chat")
+        macro.key_press(win32con.VK_ESCAPE)
+        time.sleep(0.2)
+
+        chat_client = _select_chat_client(clients_snapshot, chat_client_idx)
+        if chat_client is None:
+            print("[server] exchange window chat skipped: no connected client")
+        elif _send_client_chat(chat_client, rendered_message):
+            exchange_window_last_chat_key = chat_key
+            exchange_window_last_chat_time = now
+            print(f"[server] exchange window chat sent -> client idx({chat_client.get('idx')})")
+
+        reset_trade_state()
+        time.sleep(0.5)
+        return True
 
     while running:
         # 이전 stage가 READ_ADENA 이상이었을 경우 WAIT_NICKNAME 복귀 시 TAB + 타겟 리셋
@@ -454,6 +577,7 @@ def exchange_loop():
 
                     shop_direction = recover_direction
                     was_low_mp = False
+                    _last_shop_direction_force_time = time.time()
 
                 if macro.turn_to(shop_direction):
                     print(f"[server] 장사 방향 유지 -> {shop_direction}")
@@ -473,12 +597,21 @@ def exchange_loop():
                 if nickname in direction_change_nicknames:
                     print(f"[server] 지정 닉네임 거래창 감지: '{nickname}' -> ESC")
                     macro.key_press(win32con.VK_ESCAPE)
+                    reset_exchange_window_tracking()
                     time.sleep(0.5)
                     continue
 
                 greeted_nickname = nickname
                 # macro.arduino_type_string(f"\\f2{greeted_nickname}\\f7님 어서오세요!")
                 stage = READ_ADENA
+                continue
+
+            if time.time() - _last_shop_direction_force_time >= SHOP_DIRECTION_FORCE_INTERVAL_SECONDS:
+                if macro.turn_to(shop_direction, force=True):
+                    print(f"[server] 장사 방향 주기 보정 -> {shop_direction}")
+                    img = macro.screenshot(hwnd=macro.lineage1_hwnd)
+                _last_shop_direction_force_time = time.time()
+                time.sleep(0.2)
                 continue
 
             if (
@@ -500,13 +633,59 @@ def exchange_loop():
 
             if time.time() - _last_haste_check_time >= haste_check_interval:
                 _last_haste_check_time = time.time()
-                haste_result = _try_haste_front_person(haste_check_xy, direction_change_nicknames)
+                haste_result, front_nickname = _try_haste_front_person(haste_check_xy, direction_change_nicknames)
                 if haste_result and haste_result != "haste":
                     shop_direction = haste_result
                     _last_return_check_time = time.time()
+                    same_front_nickname = None
+                    same_front_xy = None
+                    same_front_since = 0.0
                     print(f"[server] 장사 방향 변경: {shop_direction}")
+
+                if front_nickname and haste_result == "haste":
+                    now = time.time()
+                    if same_front_nickname == front_nickname and same_front_xy == haste_check_xy:
+                        same_front_elapsed = now - same_front_since
+                    else:
+                        same_front_nickname = front_nickname
+                        same_front_xy = haste_check_xy
+                        same_front_since = now
+                        same_front_elapsed = 0.0
+
+                    chat_seconds, chat_message, chat_client_idx, chat_cooldown = _load_same_front_nickname_chat_config()
+                    chat_key = (front_nickname, haste_check_xy)
+                    can_send_chat = (
+                        chat_seconds > 0
+                        and chat_message
+                        and same_front_elapsed >= chat_seconds
+                        and (
+                            same_front_last_chat_key != chat_key
+                            or now - same_front_last_chat_time >= chat_cooldown
+                        )
+                    )
+                    if can_send_chat:
+                        try:
+                            rendered_message = chat_message.format(nickname=front_nickname)
+                        except (IndexError, KeyError, ValueError):
+                            rendered_message = chat_message
+
+                        chat_client = _select_chat_client(clients_snapshot, chat_client_idx)
+                        if chat_client is None:
+                            print(f"[server] same front nickname chat skipped: no connected client")
+                        elif _send_client_chat(chat_client, rendered_message):
+                            same_front_last_chat_key = chat_key
+                            same_front_last_chat_time = now
+                            print(
+                                f"[server] same front nickname '{front_nickname}' "
+                                f"for {same_front_elapsed:.1f}s -> client idx({chat_client.get('idx')}) chat"
+                            )
+                elif haste_result != "haste":
+                    same_front_nickname = None
+                    same_front_xy = None
+                    same_front_since = 0.0
+
                 if haste_result:
-                    time.sleep(0.5)
+                    time.sleep(HASTE_AFTER_F7_WAIT_SECONDS)
                     continue
 
             time.sleep(0.5)
@@ -515,68 +694,43 @@ def exchange_loop():
         elif stage == READ_ADENA:
             exchange_nickname = macro.readExchangeNickname(img)
             if not exchange_nickname:
+                reset_exchange_window_tracking()
                 stage = WAIT_NICKNAME
                 continue
             _, _, direction_change_nicknames = _load_haste_check_config(shop_direction)
             if exchange_nickname in direction_change_nicknames:
                 print(f"[server] 지정 닉네임 거래신청 차단: '{exchange_nickname}' -> ESC")
                 macro.key_press(win32con.VK_ESCAPE)
+                reset_exchange_window_tracking()
                 stage = WAIT_NICKNAME
                 time.sleep(0.5)
                 continue
+            if handle_exchange_window_timeout(exchange_nickname):
+                continue
             adena_before = macro.readAdena()
-            exchange_pixel_xy = _load_exchange_pixel_check_xy()
-            exchange_pixel_before = _read_exchange_check_pixel(macro.screenshot(), exchange_pixel_xy)
-            exchange_pixel_changed = False
-            if exchange_pixel_xy is not None:
-                print(f"[server] 거래 확인 픽셀 기준: xy={exchange_pixel_xy}, rgb={exchange_pixel_before}")
             macro._arduino_send(f'KP,{win32con.VK_F7}')
             stage = MONITOR_BRIGHTNESS
 
         # ── Stage 3: 슬롯 밝기 감시 → 임계값 초과 시 교환 수락 ─────────────
         elif stage == MONITOR_BRIGHTNESS:
             img = macro.screenshot()
-            if not macro.readExchangeNickname(img):
+            exchange_nickname = macro.readExchangeNickname(img)
+            if not exchange_nickname:
+                reset_exchange_window_tracking()
                 stage = PICKUP
+                continue
+            if handle_exchange_window_timeout(exchange_nickname):
                 continue
 
             slot = macro.crop(img, 258, 677, 30, 30)
             brightness = macro.get_brightness(slot)
             print(f"[server] 슬롯 밝기: {brightness:.2f}")
 
-            if exchange_pixel_xy is not None and exchange_pixel_before is not None and not exchange_pixel_changed:
-                current_pixel = _read_exchange_check_pixel(img, exchange_pixel_xy)
-                exchange_pixel_changed = current_pixel != exchange_pixel_before
-                if exchange_pixel_changed:
-                    print(
-                        f"[server] 거래 확인 픽셀 변화: xy={exchange_pixel_xy}, "
-                        f"{exchange_pixel_before} -> {current_pixel}"
-                    )
-
             if not brightness_changed and brightness > EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD:
-                if exchange_pixel_xy is not None and not exchange_pixel_changed:
-                    print(
-                        f"[server] 슬롯 밝기 {brightness:.2f} > {EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD:.1f}, "
-                        f"거래 확인 픽셀 변화 없음 -> ESC"
-                    )
-                    macro.key_press(win32con.VK_ESCAPE)
-                    time.sleep(0.2)
-                    macro.arduino_type_string("거래가 취소되었습니다. 다시 부탁드리겠습니다.")
-                    _last_type_string_time = time.time()
-                    stage = WAIT_NICKNAME
-                    greeted_nickname = None
-                    adena_before = None
-                    prev_brightness = None
-                    brightness_changed = False
-                    exchange_pixel_before = None
-                    exchange_pixel_changed = False
-                    time.sleep(0.5)
-                    continue
-
                 brightness_changed = True
                 macro.acceptExchange()
             prev_brightness = brightness
-            time.sleep(0.5)
+            time.sleep(EXCHANGE_MONITOR_INTERVAL_SECONDS)
 
         # ── Stage 4: 받은 아데나 계산 → 서버/클라이언트 픽업 분배 ──────────
         elif stage == PICKUP:
@@ -588,21 +742,21 @@ def exchange_loop():
                 adena_before = None
                 prev_brightness = None
                 brightness_changed = False
-                exchange_pixel_before = None
-                exchange_pixel_changed = False
                 continue
 
             print(f"[server] 아데나 변화 감지: {adena_before} → {adena_after} (slot_changed={brightness_changed})")
             received = adena_after - adena_before
             if received <= 0:
                 print(f"[server] 아데나 증가 없음: received={received}")
+                macro.force_set_foreground_window(macro.lineage1_hwnd)
+                macro.arduino_type_string("아데나를 받지 못 했습니다.")
+                _last_type_string_time = time.time()
+                time.sleep(1.0)
                 stage = WAIT_NICKNAME
                 greeted_nickname = None
                 adena_before = None
                 prev_brightness = None
                 brightness_changed = False
-                exchange_pixel_before = None
-                exchange_pixel_changed = False
                 continue
 
             pickup_count = macro.get_pickup_count_for_adena(received)
@@ -673,8 +827,6 @@ def exchange_loop():
             adena_before = None
             prev_brightness = None
             brightness_changed = False
-            exchange_pixel_before = None
-            exchange_pixel_changed = False
 
 
 # ── 진입점 ────────────────────────────────────────────────────────────────────

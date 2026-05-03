@@ -17,6 +17,8 @@ from ctypes import windll
 from datetime import datetime
 from PIL import Image
 
+# 이 파일은 independent_haste.py가 사용하는 저수준 공통 함수 모음입니다.
+# 화면 캡처/OCR, 창 찾기, 좌표 설정, Arduino 입력 전송을 여기서 처리합니다.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hangul
@@ -32,6 +34,7 @@ def lookup(coord_string: str) -> str | None:
 
 
 def image_to_coord_string(image: Image.Image, color: tuple) -> str:
+    """정해진 글자색 픽셀 좌표를 문자열로 바꿔 converted_data.json과 비교합니다."""
     arr = np.array(image.convert("RGB"))
     r, g, b = color
     mask = (arr[:,:,0] == r) & (arr[:,:,1] == g) & (arr[:,:,2] == b)
@@ -45,6 +48,7 @@ def crop(image: Image.Image, x: int, y: int, width: int, height: int) -> Image.I
 
 
 def read_text(image: Image.Image, x: int, y: int, color: tuple) -> str:
+    """작은 이미지 영역에서 글자를 한 글자씩 OCR합니다."""
     result = []
     img_width = image.width
     while x < img_width:
@@ -73,6 +77,7 @@ def read_line(image: Image.Image, x: int, y: int, color: tuple) -> str:
 
 
 def _read_exchange_nickname_img(screenshot: Image.Image, y: int = 292) -> str:
+    """교환창 상단의 상대 닉네임을 여러 x 위치에서 읽어 가장 긴 결과를 사용합니다."""
     x = 107
     w, h = 140, 24
     color = (255, 255, 255)
@@ -344,12 +349,14 @@ _last_mp_retry_ctrl_a_time = 0.0
 
 
 def _load_macro_data() -> dict:
+    """독립 폴더 안의 macro_data.json을 읽습니다. 루트 설정 파일과 섞이지 않습니다."""
     data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
     with open(data_path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def _load_price_config(data: dict) -> None:
+    """1방/3방/6방 가격 설정을 전역 값으로 반영합니다."""
     global adena_per_pickup, adena_three_pickup_price, adena_six_pickup_price
     adena_per_pickup = int(data["adena_per_pickup"])
     adena_three_pickup_price = int(data.get("adena_three_pickup_price", adena_per_pickup * 3))
@@ -365,6 +372,7 @@ def get_adena_six_pickup_price() -> int:
 
 
 def get_adena_price_notice() -> str:
+    """채팅 광고에 사용할 가격 문구를 만듭니다."""
     return (
         f"1방 {adena_per_pickup}원 "
         f"6방 {get_adena_six_pickup_price()}원"
@@ -372,6 +380,7 @@ def get_adena_price_notice() -> str:
 
 
 def get_pickup_count_for_adena(received: int | float) -> int:
+    """받은 아데나를 헤이스트 방 수로 계산합니다. 3방/6방 가격만 특가로 봅니다."""
     try:
         received_int = int(received)
     except (TypeError, ValueError):
@@ -418,6 +427,7 @@ def get_configured_mouse_xy(
     fallback_key: str | None = None,
     direction: str | None = None,
 ) -> tuple[int, int]:
+    """현재 역할(server/client)과 방향에 맞는 확인/픽업 좌표를 반환합니다."""
     if key is None:
         key = _mouse_key
     if key is None:
@@ -467,6 +477,8 @@ def get_hwnd() -> int:
 
 
 def init_setting(role: str):
+    # independent_haste.py가 server/client 자식 프로세스를 띄울 때 가장 먼저 호출됩니다.
+    # 여기서 Lineage 창을 찾고, 타이틀을 server/client로 맞춘 뒤 좌표 설정을 읽습니다.
     """
     role: "server" 또는 "client"
     1. "Lineage Classic"으로 시작하는 윈도우를 찾아 타이틀 설정 및 lineage1_hwnd 지정
@@ -560,6 +572,8 @@ def init_setting(role: str):
 
 
 def init_custom_hwnd(title: str, role: str = "client"):
+    # 특정 창 제목을 직접 지정해서 제어하고 싶을 때 쓰는 초기화 함수입니다.
+    # 일반 독립 헤이스트 실행에서는 보통 init_setting()을 사용합니다.
     """
     title: 찾을 윈도우 타이틀 이름 (해당 타이틀의 윈도우를 lineage1_hwnd로 지정)
     role: mouse x,y 키 결정에 사용 ("server" / "client" / 그 외 → client_numbering)
@@ -644,6 +658,7 @@ def move_window(x: int, y: int):
 
 
 def screenshot(filename: str = None, hwnd: int = None) -> Image.Image:
+    """Lineage 창을 캡처합니다. 모든 OCR/픽셀/밝기 판단의 기준 이미지입니다."""
     if hwnd is None:
         hwnd = get_hwnd()
     rect = win32gui.GetWindowRect(hwnd)
@@ -715,6 +730,7 @@ def shake_mouse_small(count=10, dist=10, delay=0.05):
         time.sleep(delay)
 
 def use_potion():
+    """MP 포션 단축키 F8을 누릅니다."""
     force_set_foreground_window(lineage1_hwnd)
     time.sleep(0.5)
     _arduino_send(f'KP,{win32con.VK_F8}')
@@ -737,6 +753,7 @@ def press_ctrl_a_for_mp_retry(cooldown: float = 3.0) -> bool:
 
 
 def pickup_lineage1(target_nickname: str | None = None, direction: str | None = None):
+    """현재 방향 좌표에 있는 대상에게 F5 픽업 동작을 수행합니다."""
     x, y = get_configured_mouse_xy(direction=direction)
     force_set_foreground_window(lineage1_hwnd)
     win32api.SetCursorPos((x, y))
@@ -780,6 +797,7 @@ def get_brightness(image: Image.Image) -> float:
 
 
 def readMp(img=None) -> int | None:
+    """화면 우측 상단 MP 숫자를 OCR로 읽습니다. 실패하면 None을 반환합니다."""
     if img is None:
         img = screenshot()
     for dx in (0, 5, 10):
@@ -793,6 +811,7 @@ def readMp(img=None) -> int | None:
 
 
 def readAdena(max_attempts: int | None = None, key_delay: float = 0.2) -> int | None:
+    """F9로 아데나 표시를 띄운 뒤 현재 아데나 값을 OCR로 읽습니다."""
     force_set_foreground_window(lineage1_hwnd)
     attempts = 0
     while max_attempts is None or attempts < max_attempts:
@@ -818,6 +837,7 @@ def readAdena(max_attempts: int | None = None, key_delay: float = 0.2) -> int | 
 
 
 def readExchangeNickname(img=None):
+    """현재 열려 있는 교환창의 상대 닉네임을 읽습니다."""
     global _exchange_nickname_xy
     if img is None:
         img = screenshot()
@@ -831,6 +851,7 @@ def readExchangeNickname(img=None):
 
 
 def acceptExchange():
+    """교환창 OK 버튼을 누르고 Y/Enter로 최종 확인합니다."""
     win32api.SetCursorPos((247, 752))
     time.sleep(0.5)
     _arduino_send('CL')
@@ -883,6 +904,7 @@ _DIRECTION_FUNCS = {
 
 
 def turn_to(direction: str, force: bool = False, settle_delay: float = 1.0) -> bool:
+    """macro_data.json의 방향 클릭 좌표를 이용해 캐릭터 방향을 바꿉니다."""
     func = _DIRECTION_FUNCS.get(direction)
     if func is None:
         print(f"[macro] 알 수 없는 방향: {direction!r}")

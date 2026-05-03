@@ -355,6 +355,14 @@ def apply_coord_delta(dx: int, dy: int):
     print(f"[macro] 좌표 이동 적용: dx={dx:+}, dy={dy:+} → {_mouse_xy}")
 
 
+def reset_coord():
+    """픽업 좌표를 config 초기값으로 되돌린다."""
+    with open("macro_data.json", encoding="utf-8") as f:
+        data = json.load(f)
+    _mouse_xy[:] = data[_mouse_key]
+    print(f"[macro] 좌표 초기화: {_mouse_xy}")
+
+
 def add_to_blocked_list(nickname: str):
     """blocked_list에 닉네임을 추가하고 macro_data.json에 저장한다."""
     if nickname in blocked_list:

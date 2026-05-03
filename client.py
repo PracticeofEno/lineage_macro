@@ -77,6 +77,10 @@ def _handle_command(msg: dict) -> dict | None:
         print(f"[client] 좌표 이동 수신: dx={dx:+}, dy={dy:+}")
         return {"status": "ok"}
 
+    if cmd == "reset_coord":
+        macro.reset_coord()
+        return None
+
     print(f"[client] 알 수 없는 명령: {msg}")
     return None
 

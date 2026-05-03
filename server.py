@@ -111,6 +111,10 @@ def _handle_client(conn: socket.socket, addr: tuple):
     client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "idx": idx, "available": 0, "potion_last_used": 0}
     with _clients_lock:
         _clients.append(client)
+
+    _send_json(conn, {"cmd": "reset_coord"})
+    print(f"[server] 좌표 초기화 전송 → {addr}")
+
     try:
         while True:
             with client["lock"]:

@@ -298,7 +298,6 @@ def _step_char(char: dict, state: dict, label: str):
             macro.force_set_foreground_window(char["hwnd"])
         time.sleep(0.1)
         macro.arduino_type_string(f"감삼당~")
-        macro.key_press(win32con.VK_TAB)
         time.sleep(0.3)
         _restore_high_count_direction(char)
         _reset_state(state)

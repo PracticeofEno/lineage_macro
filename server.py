@@ -249,12 +249,11 @@ def exchange_loop():
                 if macro.current_direction != macro.low_count_direction:
                     macro.force_set_foreground_window(macro.lineage1_hwnd)
                     macro._DIRECTION_FUNCS[macro.low_count_direction]()
-                    # low_count_direction 전환: 클라이언트 좌표 이동 없음
                     time.sleep(1)
                 time.sleep(0.5)
                 continue
             else:
-                if macro.current_direction != macro.high_count_direction:
+                if macro.current_direction == macro.low_count_direction:
                     from_dir = _client_coord_direction or macro.current_direction
                     macro.force_set_foreground_window(macro.lineage1_hwnd)
                     time.sleep(1)

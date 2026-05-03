@@ -197,14 +197,6 @@ def _step_char(char: dict, state: dict, label: str):
         img = macro.screenshot(hwnd=char["hwnd"])
         nickname = macro.readExchangeNickname(img=img)
         if nickname:
-            if _is_blocked_text(nickname):
-                print(f"[{label}] blocked_list exchange nickname: '{nickname}' -> reject")
-                with _fg_lock:
-                    _set_context(char)
-                    macro.force_set_foreground_window(char["hwnd"])
-                    macro.rejectExchange()
-                _reset_state(state)
-                return
             state["greeted_nickname"] = nickname
             state["stage"] = READ_ADENA
             return
@@ -248,7 +240,8 @@ def _step_char(char: dict, state: dict, label: str):
     elif stage == MONITOR_BRIGHTNESS:
         _set_context(char)
         img = macro.screenshot()
-        if not macro.readExchangeNickname(img):
+        nickname = macro.readExchangeNickname(img)
+        if not nickname:
             state["stage"] = PICKUP
             return
 
@@ -256,7 +249,19 @@ def _step_char(char: dict, state: dict, label: str):
         brightness = macro.get_brightness(slot)
         print(f"[{label}] 슬롯 밝기: {brightness:.2f}")
 
-        if (state["prev_brightness"] is not None) and (brightness != state["prev_brightness"] or brightness > 105):
+        has_prev_brightness = state["prev_brightness"] is not None
+        exchange_nickname = state["greeted_nickname"] or nickname
+        if has_prev_brightness and _is_blocked_text(exchange_nickname):
+            print(f"[{label}] blocked_list exchange nickname: '{exchange_nickname}' -> reject")
+            with _fg_lock:
+                _set_context(char)
+                macro.force_set_foreground_window(char["hwnd"])
+                macro.rejectExchange()
+                time.sleep(0.3)
+            _reset_state(state)
+            return
+
+        if has_prev_brightness and (brightness != state["prev_brightness"] or brightness > 105):
             state["brightness_changed"] = True
             if state["available_at_exchange"] is None:
                 state["available_at_exchange"] = int(char["available"])

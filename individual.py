@@ -97,6 +97,17 @@ def _is_blocked_text(text: str) -> bool:
     return text.strip() in blocked_list
 
 
+def _add_blocked_text(text: str) -> bool:
+    text = text.strip()
+    if not text:
+        return False
+    blocked_list = _cfg.setdefault("blocked_list", [])
+    if text in blocked_list:
+        return False
+    blocked_list.append(text)
+    return True
+
+
 def _pickup(char: dict, nickname: str | None):
     with _fg_lock:
         _set_context(char)
@@ -253,6 +264,8 @@ def _step_char(char: dict, state: dict, label: str):
                 state["last_input_text"] = input_text
                 state["input_text_since"] = time.time()
             elif time.time() - state["input_text_since"] >= 60:
+                if _add_blocked_text(input_text):
+                    print(f"[{label}] 60s same input_text -> blocked_list add: '{input_text}'")
                 _change_to_random_direction(char)
                 state["last_input_text"] = None
                 state["input_text_since"] = time.time()

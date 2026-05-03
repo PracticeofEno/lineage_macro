@@ -154,7 +154,6 @@ void processCommand(const String &cmd) {
             Keyboard.release(hid);
         } else {  // KP
             Keyboard.press(hid);
-            delay(10);
             Keyboard.release(hid);
         }
 

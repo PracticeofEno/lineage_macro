@@ -712,6 +712,17 @@ def acceptExchange():
     time.sleep(0.3)
 
 
+def rejectExchange():
+    win32api.SetCursorPos((311, 752))
+    time.sleep(0.5)
+    _arduino_send('CL')
+    time.sleep(0.5)
+    arduino_key_press(ord('Y'))
+    time.sleep(0.1)
+    _arduino_send(f'KP,{win32con.VK_RETURN}')
+    time.sleep(0.3)
+
+
 def findExchangeNicknameY(img=None) -> tuple[int, int] | None:
     """y=480에서 50까지 스캔하며 닉네임 텍스트가 처음 발견되는 (x, y) 좌표를 반환한다."""
     if img is None:
@@ -735,15 +746,20 @@ def readInputText(img=None) -> str:
 
 _pickup_xy: tuple[int, int] | None = None
 
-def has_target_in_input() -> bool:
+def has_target_in_input(
+    xy: tuple[int, int] | None = None,
+    *,
+    label: str | None = None,
+    return_text: bool = False,
+) -> bool | tuple[bool, str]:
     """shift+우클릭으로 타겟 확인 후 입력창 초기화, 타겟이 있으면 True 반환"""
     global _pickup_xy
-    if _pickup_xy is None:
+    if xy is None and _pickup_xy is None:
         data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
         with open(data_path, encoding="utf-8") as f:
             data = json.load(f)
         _pickup_xy = tuple(data[_mouse_key])
-    x, y = _pickup_xy
+    x, y = tuple(xy) if xy is not None else _pickup_xy
     win32api.SetCursorPos((x, y))
     arduino_mouse_shift_click_right(x, y)
     time.sleep(0.1)
@@ -753,7 +769,10 @@ def has_target_in_input() -> bool:
     arduino_key_press(win32con.VK_BACK)
     arduino_key_up(win32con.VK_CONTROL)
     time.sleep(0.1)
-    return bool(input_text)
+    has_target = bool(input_text)
+    if return_text:
+        return has_target, input_text
+    return has_target
 
 
 def monitor_chat():

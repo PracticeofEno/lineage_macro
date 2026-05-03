@@ -28,8 +28,10 @@ _INDIVIDUAL_CFG_PATH = os.path.join(_BASE, "individual.json")
 
 _cfg: dict = {}
 
+adena_per_pickup: int = 150
 low_count_direction: str = "southeast"
 high_count_direction: str = "northwest"
+POTION_COOLDOWN = 600
 
 WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(4)
 
@@ -61,6 +63,16 @@ def _change_direction(char: dict, direction: str):
         x, y = _cfg["turn_x_y_by_direction"][direction]
         macro.arduino_mouse_shift_click_left(x, y)
     char["direction"] = direction
+
+
+def _change_to_random_direction(char: dict):
+    directions = [d for d in _cfg["turn_x_y_by_direction"] if d != char["direction"]]
+    _change_direction(char, random.choice(directions))
+
+
+def _is_blocked_text(text: str) -> bool:
+    blocked_list = _cfg.get("blocked_list", [])
+    return text.strip() in blocked_list
 
 
 def _pickup(char: dict, nickname: str | None):
@@ -101,16 +113,29 @@ def _update_mp(char: dict):
     char["available"] = int(char["mp"] // 20)
 
 
+def _try_use_potion(char: dict, label: str) -> bool:
+    if char["available"] >= 2:
+        return False
+
+    now = time.time()
+    if now - char.get("potion_last_used", 0.0) < POTION_COOLDOWN:
+        return False
+
+    with _fg_lock:
+        _set_context(char)
+        macro.use_potion()
+    char["potion_last_used"] = now
+    print(f"[{label}] 포션 사용 (available: {char['available']})")
+    return True
+
+
 def _manage_direction(char: dict):
-    if char["available"] < char["direction_threshold"]:
-        if char["direction"] != low_count_direction:
-            _change_direction(char, low_count_direction)
-            time.sleep(1)
-    else:
-        if char["direction"] != high_count_direction:
-            time.sleep(1)
-            _change_direction(char, high_count_direction)
-            time.sleep(1)
+    if char["direction_initialized"]:
+        return
+    if char["direction"] != high_count_direction:
+        _change_direction(char, high_count_direction)
+        time.sleep(1)
+    char["direction_initialized"] = True
 
 
 def _make_state() -> dict:
@@ -121,6 +146,10 @@ def _make_state() -> dict:
         "prev_brightness": None,
         "brightness_changed": False,
         "last_ad_time": 0.0,
+        "last_input_text": None,
+        "input_text_since": 0.0,
+        "pickups_remaining": None,
+        "low_mp_ad_idx": 0,
     }
 
 
@@ -130,6 +159,7 @@ def _reset_state(state: dict):
     state["adena_before"] = None
     state["prev_brightness"] = None
     state["brightness_changed"] = False
+    state["pickups_remaining"] = None
 
 
 def _step_char(char: dict, state: dict, label: str):
@@ -139,26 +169,61 @@ def _step_char(char: dict, state: dict, label: str):
     if stage == WAIT_NICKNAME:
         if time.time() - state["last_ad_time"] >= 12:
             a = char["available"]
-            _ad_formats = [
-                f"헤이 {macro.adena_per_pickup} {a}방 !",
-                f"{a}방 가능 한방에 {macro.adena_per_pickup}아데나!",
-            ]
             with _fg_lock:
                 macro.force_set_foreground_window(char["hwnd"])
-            macro.arduino_type_string(random.choice(_ad_formats))
+            if a < 3:
+                macro.arduino_type_string(f"엠탐.. {char['available']}/3")
+                # _low_mp_formats = [
+                    # f"엠탐.. {char['available']}/3",
+                    # f"잠시만요.. {char['available']}/3",
+                # ]
+                # macro.arduino_type_string(f"엠탐.. {char['available']}/3")
+                # state["low_mp_ad_idx"] += 1
+            else:
+                _ad_formats = [
+                    f"헤이 {adena_per_pickup} {a}방 가능!",
+                ]
+                macro.arduino_type_string(random.choice(_ad_formats))
             state["last_ad_time"] = time.time()
 
         _set_context(char)
         img = macro.screenshot(hwnd=char["hwnd"])
         nickname = macro.readExchangeNickname(img=img)
         if nickname:
+            if _is_blocked_text(nickname):
+                print(f"[{label}] blocked_list exchange nickname: '{nickname}' -> reject")
+                with _fg_lock:
+                    _set_context(char)
+                    macro.force_set_foreground_window(char["hwnd"])
+                    macro.rejectExchange()
+                _reset_state(state)
+                return
             state["greeted_nickname"] = nickname
             state["stage"] = READ_ADENA
             return
 
         with _fg_lock:
             macro.force_set_foreground_window(char["hwnd"])
-        if macro.has_target_in_input():
+        has_target, input_text = macro.has_target_in_input(
+            _pickup_xy(char),
+            label=label,
+            return_text=True,
+        )
+        if has_target:
+            print(f"[{label}] 타겟 감지된 입력창 텍스트: '{input_text}'")
+            if _is_blocked_text(input_text):
+                print(f"[{label}] blocked_list 대상 감지: '{input_text}' -> 방향 전환")
+                _change_to_random_direction(char)
+                state["last_input_text"] = None
+                state["input_text_since"] = time.time()
+                return
+            if input_text != state["last_input_text"]:
+                state["last_input_text"] = input_text
+                state["input_text_since"] = time.time()
+            elif time.time() - state["input_text_since"] >= 60:
+                _change_to_random_direction(char)
+                state["last_input_text"] = None
+                state["input_text_since"] = time.time()
             macro._arduino_send(f'KP,{win32con.VK_F7}')
 
     # ── Stage 2: 교환 전 아데나 1회 측정 ─────────────────────────────────────
@@ -200,24 +265,27 @@ def _step_char(char: dict, state: dict, label: str):
             _reset_state(state)
             return
 
-        _set_context(char)
-        adena_after = macro.readAdena()
-        received = adena_after - state["adena_before"]
-        print(f"[{label}] 아데나 변화 감지: {state['adena_before']} → {adena_after}, received: {received}")
+        # 최초 진입: 아데나 측정 후 지급 횟수 계산
+        if state["pickups_remaining"] is None:
+            _set_context(char)
+            adena_after = macro.readAdena()
+            received = adena_after - state["adena_before"]
+            state["pickups_remaining"] = max(0, int(received // adena_per_pickup))
+            print(f"[{label}] 아데나 변화: {state['adena_before']} → {adena_after}, received: {received}, 지급 픽업: {state['pickups_remaining']}")
 
-        if char["available"] > 0:
-            print(f"[{label}] 픽업 실행")
+        # 픽업 1회 실행 후 return → 상대방 차례 양보
+        if state["pickups_remaining"] > 0:
+            print(f"[{label}] 픽업 실행 (남은: {state['pickups_remaining']})")
             _pickup(char, state["greeted_nickname"])
-            char["available"] -= 1
+            state["pickups_remaining"] -= 1
+            return
 
+        # 픽업 완료
         with _fg_lock:
             _set_context(char)
             macro.force_set_foreground_window(char["hwnd"])
         time.sleep(0.1)
-        if received > 0:
-            display_name = state["greeted_nickname"][:2] if len(state["greeted_nickname"]) > 2 else state["greeted_nickname"]
-            macro.arduino_type_string(f"{display_name}님 감사합니당~!")
-
+        macro.arduino_type_string(f"감삼당~")
         macro.key_press(win32con.VK_TAB)
         time.sleep(0.3)
         _reset_state(state)
@@ -233,6 +301,11 @@ def exchange_loop():
     while running:
         _update_mp(server_char)
         _update_mp(client_char)
+
+        if server_state["stage"] == WAIT_NICKNAME:
+            _try_use_potion(server_char, "server")
+        if client_state["stage"] == WAIT_NICKNAME:
+            _try_use_potion(client_char, "client")
 
         if time.time() - _last_status_print_time >= 3:
             print(f"[server] MP: {server_char['mp']}, 잔여: {server_char['available']}, stage: {server_state['stage']}")
@@ -252,13 +325,14 @@ if __name__ == "__main__":
     macro.init_setting("server")
     with open(_INDIVIDUAL_CFG_PATH, encoding="utf-8") as _f:
         _cfg = json.load(_f)
+    adena_per_pickup = _cfg["adena_per_pickup"]
     low_count_direction = _cfg["low_count_direction"]
     high_count_direction = _cfg["high_count_direction"]
     init_direction = _cfg["current_direction"]
     print(f"direction: {init_direction}, low: {low_count_direction}, high: {high_count_direction}")
 
-    server_char = {"hwnd": _find_hwnd("server"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0}
-    client_char = {"hwnd": _find_hwnd("client"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0}
+    server_char = {"hwnd": _find_hwnd("server"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0,  "direction_initialized": False, "potion_last_used": 0.0}
+    client_char = {"hwnd": _find_hwnd("client"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0, "direction_initialized": False, "potion_last_used": 0.0}
 
     print("\n명령어: q=종료, 1=exchange 시작, 2=exchange 중지")
     exchange_thread = None

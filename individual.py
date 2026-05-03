@@ -149,6 +149,7 @@ def _make_state() -> dict:
         "last_input_text": None,
         "input_text_since": 0.0,
         "pickups_remaining": None,
+        "available_at_exchange": None,
         "low_mp_ad_idx": 0,
     }
 
@@ -160,6 +161,7 @@ def _reset_state(state: dict):
     state["prev_brightness"] = None
     state["brightness_changed"] = False
     state["pickups_remaining"] = None
+    state["available_at_exchange"] = None
 
 
 def _step_char(char: dict, state: dict, label: str):
@@ -251,6 +253,8 @@ def _step_char(char: dict, state: dict, label: str):
 
         if (state["prev_brightness"] is not None) and (brightness != state["prev_brightness"] or brightness > 110):
             state["brightness_changed"] = True
+            if state["available_at_exchange"] is None:
+                state["available_at_exchange"] = int(char["available"])
             with _fg_lock:
                 macro.force_set_foreground_window(char["hwnd"])
             macro.acceptExchange()
@@ -270,8 +274,10 @@ def _step_char(char: dict, state: dict, label: str):
             _set_context(char)
             adena_after = macro.readAdena()
             received = adena_after - state["adena_before"]
-            state["pickups_remaining"] = max(0, int(received // adena_per_pickup))
-            print(f"[{label}] 아데나 변화: {state['adena_before']} → {adena_after}, received: {received}, 지급 픽업: {state['pickups_remaining']}")
+            paid_pickups = max(0, int(received // adena_per_pickup))
+            available_at_exchange = int(state["available_at_exchange"])
+            state["pickups_remaining"] = min(paid_pickups, available_at_exchange)
+            print(f"[{label}] received: {received}, pickups_remaining: {state['pickups_remaining']}")
 
         # 픽업 1회 실행 후 return → 상대방 차례 양보
         if state["pickups_remaining"] > 0:

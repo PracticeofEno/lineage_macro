@@ -132,10 +132,15 @@ def _try_use_potion(char: dict, label: str) -> bool:
 def _manage_direction(char: dict):
     if char["direction_initialized"]:
         return
-    if char["direction"] != high_count_direction:
-        _change_direction(char, high_count_direction)
-        time.sleep(1)
+    _restore_high_count_direction(char)
     char["direction_initialized"] = True
+
+
+def _restore_high_count_direction(char: dict):
+    if char["direction"] == high_count_direction:
+        return
+    _change_direction(char, high_count_direction)
+    time.sleep(1)
 
 
 def _make_state() -> dict:
@@ -251,7 +256,7 @@ def _step_char(char: dict, state: dict, label: str):
         brightness = macro.get_brightness(slot)
         print(f"[{label}] 슬롯 밝기: {brightness:.2f}")
 
-        if (state["prev_brightness"] is not None) and (brightness != state["prev_brightness"] or brightness > 110):
+        if (state["prev_brightness"] is not None) and (brightness != state["prev_brightness"] or brightness > 105):
             state["brightness_changed"] = True
             if state["available_at_exchange"] is None:
                 state["available_at_exchange"] = int(char["available"])
@@ -266,6 +271,7 @@ def _step_char(char: dict, state: dict, label: str):
             _set_context(char)
             macro.key_press(win32con.VK_TAB)
             time.sleep(0.3)
+            _restore_high_count_direction(char)
             _reset_state(state)
             return
 
@@ -294,6 +300,7 @@ def _step_char(char: dict, state: dict, label: str):
         macro.arduino_type_string(f"감삼당~")
         macro.key_press(win32con.VK_TAB)
         time.sleep(0.3)
+        _restore_high_count_direction(char)
         _reset_state(state)
 
 

@@ -1,6 +1,6 @@
 {
-    "server_mouse_x_y": [605, 358],
-    "client_mouse_x_y": [565, 338],
+    "server_mouse_x_y": [605, 350],
+    "client_mouse_x_y": [565, 330],
     "client_numbering_mouse_x_y": [1359, 314],
 
     "direction_threshold": 6,

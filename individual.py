@@ -34,6 +34,7 @@ high_count_direction: str = "northwest"
 POTION_COOLDOWN = 600
 PREFERRED_RANDOM_TURN_DIRECTIONS = {"northeast", "southeast", "southwest", "northwest"}
 PREFERRED_RANDOM_TURN_WEIGHT = 0.75
+NON_PREFERRED_TURN_DELAY = 60.0
 
 WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(4)
 
@@ -77,6 +78,16 @@ def _change_to_random_direction(char: dict):
     else:
         directions = preferred or remaining
 
+    if directions:
+        _change_direction(char, random.choice(directions))
+
+
+def _change_to_preferred_random_direction(char: dict):
+    directions = [
+        d
+        for d in _cfg["turn_x_y_by_direction"]
+        if d in PREFERRED_RANDOM_TURN_DIRECTIONS and d != char["direction"]
+    ]
     if directions:
         _change_direction(char, random.choice(directions))
 
@@ -167,6 +178,7 @@ def _make_state() -> dict:
         "pickups_remaining": None,
         "available_at_exchange": None,
         "low_mp_ad_idx": 0,
+        "non_preferred_direction_since": 0.0,
     }
 
 
@@ -178,6 +190,7 @@ def _reset_state(state: dict):
     state["brightness_changed"] = False
     state["pickups_remaining"] = None
     state["available_at_exchange"] = None
+    state["non_preferred_direction_since"] = 0.0
 
 
 def _step_char(char: dict, state: dict, label: str):
@@ -185,6 +198,15 @@ def _step_char(char: dict, state: dict, label: str):
 
     # ── Stage 1: 광고 / 닉네임 대기 ─────────────────────────────────────────
     if stage == WAIT_NICKNAME:
+        now = time.time()
+        if char["direction"] in PREFERRED_RANDOM_TURN_DIRECTIONS:
+            state["non_preferred_direction_since"] = 0.0
+        elif state["non_preferred_direction_since"] == 0.0:
+            state["non_preferred_direction_since"] = now
+        elif now - state["non_preferred_direction_since"] >= NON_PREFERRED_TURN_DELAY:
+            _change_to_preferred_random_direction(char)
+            state["non_preferred_direction_since"] = 0.0
+
         if time.time() - state["last_ad_time"] >= 12:
             a = char["available"]
             with _fg_lock:
@@ -235,6 +257,9 @@ def _step_char(char: dict, state: dict, label: str):
                 state["last_input_text"] = None
                 state["input_text_since"] = time.time()
             macro._arduino_send(f'KP,{win32con.VK_F7}')
+        else:
+            state["last_input_text"] = None
+            state["input_text_since"] = 0.0
 
     # ── Stage 2: 교환 전 아데나 1회 측정 ─────────────────────────────────────
     elif stage == READ_ADENA:

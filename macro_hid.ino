@@ -133,6 +133,18 @@ void moveTo(int targetX, int targetY) {
     }
 }
 
+// ── 키 헬퍼 (press/release + 타임아웃 갱신) ─────────────────────────────────
+void safePress(int hid) {
+    Keyboard.press(hid);
+    lastCmdTime = millis();
+    inputsReleased = false;
+}
+
+void safeRelease(int hid) {
+    Keyboard.release(hid);
+    lastCmdTime = millis();
+}
+
 // ── 명령 파싱 및 실행 ────────────────────────────────────────────────────────
 void processCommand(const String &cmd) {
     if (cmd.length() == 0) return;
@@ -149,13 +161,13 @@ void processCommand(const String &cmd) {
         if (hid == -1) { Serial.println("ERR:UNKNOWN_VK"); return; }
 
         if (action == "KD") {
-            Keyboard.press(hid);
+            safePress(hid);
         } else if (action == "KU") {
-            Keyboard.release(hid);
+            safeRelease(hid);
         } else {  // KP
-            Keyboard.press(hid);
+            safePress(hid);
             delay(10);
-            Keyboard.release(hid);
+            safeRelease(hid);
         }
 
     // ── 백스페이스 n 회 ──
@@ -243,6 +255,14 @@ void processCommand(const String &cmd) {
         for (int i = 0; i < 100; i++) Mouse.move(-127, -127, 0);
         curX = 0;
         curY = 0;
+
+    // ── 전체 해제 ──
+    } else if (action == "RA") {
+        Keyboard.releaseAll();
+        Mouse.release(MOUSE_LEFT);
+        Mouse.release(MOUSE_RIGHT);
+        Mouse.release(MOUSE_MIDDLE);
+        inputsReleased = true;
 
     } else {
         Serial.println("ERR:UNKNOWN_CMD");

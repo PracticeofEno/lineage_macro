@@ -24,19 +24,14 @@ server_char: dict = {}
 client_char: dict = {}
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
-_MOUSE_DIR_PATH = os.path.join(_BASE, "mouse_direction_data.json")
 _INDIVIDUAL_CFG_PATH = os.path.join(_BASE, "individual.json")
 
-direction_threshold: int = 0
+_cfg: dict = {}
+
 low_count_direction: str = "southeast"
 high_count_direction: str = "northwest"
 
 WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(4)
-
-
-def _load_mouse_dir() -> dict:
-    with open(_MOUSE_DIR_PATH, encoding="utf-8") as f:
-        return json.load(f)
 
 
 def _find_hwnd(title: str) -> int:
@@ -56,15 +51,15 @@ def _set_context(char: dict):
 
 
 def _pickup_xy(char: dict) -> tuple[int, int]:
-    data = _load_mouse_dir()
-    return tuple(data["mouse_x_y_by_direction"][char["direction"]])
+    return tuple(_cfg["mouse_x_y_by_direction"][char["direction"]])
 
 
 def _change_direction(char: dict, direction: str):
     with _fg_lock:
         _set_context(char)
         macro.force_set_foreground_window(char["hwnd"])
-        macro._DIRECTION_FUNCS[direction]()
+        x, y = _cfg["turn_x_y_by_direction"][direction]
+        macro.arduino_mouse_shift_click_left(x, y)
     char["direction"] = direction
 
 
@@ -97,18 +92,17 @@ def _pickup(char: dict, nickname: str | None):
 
 
 def _update_mp(char: dict):
-    global direction_threshold
     img = macro.screenshot(hwnd=char["hwnd"])
     mp = macro.readMp(img)
     if mp != 0:
         char["mp"] = mp
-        if direction_threshold == 0:
-            direction_threshold = int(mp // 20)
+        if char["direction_threshold"] == 0:
+            char["direction_threshold"] = int(mp // 20)
     char["available"] = int(char["mp"] // 20)
 
 
 def _manage_direction(char: dict):
-    if char["available"] < direction_threshold:
+    if char["available"] < char["direction_threshold"]:
         if char["direction"] != low_count_direction:
             _change_direction(char, low_count_direction)
             time.sleep(1)
@@ -261,10 +255,10 @@ if __name__ == "__main__":
     low_count_direction = _cfg["low_count_direction"]
     high_count_direction = _cfg["high_count_direction"]
     init_direction = _cfg["current_direction"]
-    print(init_direction)
+    print(f"direction: {init_direction}, low: {low_count_direction}, high: {high_count_direction}")
 
-    server_char = {"hwnd": _find_hwnd("server"), "mp": 0, "available": 0, "direction": init_direction}
-    client_char = {"hwnd": _find_hwnd("client"), "mp": 0, "available": 0, "direction": init_direction}
+    server_char = {"hwnd": _find_hwnd("server"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0}
+    client_char = {"hwnd": _find_hwnd("client"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0}
 
     print("\n명령어: q=종료, 1=exchange 시작, 2=exchange 중지")
     exchange_thread = None

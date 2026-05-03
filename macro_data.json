@@ -1,25 +1,25 @@
 {
-    "server_mouse_x_y": [685, 406],
+    "server_mouse_x_y": [690, 410],
     "server_mouse_x_y_by_direction": {
         "north": [650, 350],
-        "northeast": [690, 375],
-        "east": [730, 400],
-        "southeast": [690, 425],
-        "south": [650, 450],
-        "southwest": [610, 425],
-        "west": [570, 400],
-        "northwest": [610, 375]
+        "northeast": [690, 370],
+        "east": [730, 390],
+        "southeast": [690, 410],
+        "south": [650, 430],
+        "southwest": [610, 410],
+        "west": [570, 390],
+        "northwest": [610, 370]
     },
-    "client_mouse_x_y": [725, 426],
+    "client_mouse_x_y": [730, 430],
     "client_mouse_x_y_by_direction": {
-        "north": [690, 375],
-        "northeast": [730, 400],
-        "east": [765, 395],
-        "southeast": [725, 426],
-        "south": [690, 430],
-        "southwest": [650, 450],
-        "west": [610, 425],
-        "northwest": [725, 426]
+        "north": [650, 350],
+        "northeast": [690, 370],
+        "east": [730, 390],
+        "southeast": [730, 430],
+        "south": [650, 430],
+        "southwest": [610, 410],
+        "west": [570, 390],
+        "northwest": [610, 370]
     },
     "client_numbering_mouse_x_y": [
         1359,
@@ -36,10 +36,13 @@
         "northwest": [1359, 314]
     },
     "haste_check_interval_seconds": 3.0,
-    "direction_change_nicknames": ["헤이로집산다", "질서유지", "더드림", "꼭드림", "또드림", "다드림", "왜드림", "막드림"],
+    "exchange_pixel_check_xy": [82, 567],
+    "direction_change_nicknames": [],
     "blocked_turn_directions": ["north", "east", "south", "west"],
     "direction_threshold": 6,
     "adena_per_pickup": 150,
+    "adena_three_pickup_price": 450,
+    "adena_six_pickup_price": 900,
     "current_direction": "north",
     "low_count_direction": "northwest",
     "high_count_direction": "southeast",

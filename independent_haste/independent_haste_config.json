@@ -1,0 +1,8 @@
+{
+  "_comment": "Settings used only by independent_haste.py. Run without arguments and use q/1/2 commands.",
+  "same_nickname_turn_seconds": 30,
+  "start_arduino_proxy": false,
+  "status_interval": 3.0,
+  "start_delay_seconds": 2.0,
+  "python_executable": ""
+}

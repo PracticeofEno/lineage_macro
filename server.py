@@ -25,6 +25,8 @@ POTION_COOLDOWN = 600 # 포션 쿨타임(초)
 LOW_MP_AVAILABLE_THRESHOLD = 2
 HASTE_CHECK_DEFAULT_INTERVAL = 3.0
 DIRECTION_RETURN_CHECK_INTERVAL = 30.0
+EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD = 120.0
+EXCHANGE_PIXEL_CHANGE_DEFAULT_XY = (848, 877)
 TURN_DIRECTIONS = (
     "north",
     "northeast",
@@ -74,6 +76,28 @@ def _load_macro_data() -> dict:
     data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
     with open(data_path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _coerce_exchange_pixel_xy(value) -> tuple[int, int] | None:
+    if value is None:
+        return EXCHANGE_PIXEL_CHANGE_DEFAULT_XY
+    if value is False:
+        return None
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        return int(value[0]), int(value[1])
+    raise RuntimeError(f"invalid exchange_pixel_check_xy: {value!r}")
+
+
+def _load_exchange_pixel_check_xy() -> tuple[int, int] | None:
+    data = _load_macro_data()
+    return _coerce_exchange_pixel_xy(data.get("exchange_pixel_check_xy", EXCHANGE_PIXEL_CHANGE_DEFAULT_XY))
+
+
+def _read_exchange_check_pixel(img, xy: tuple[int, int] | None) -> tuple[int, int, int] | None:
+    if xy is None:
+        return None
+    pixel = img.getpixel(xy)
+    return tuple(int(value) for value in pixel[:3])
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -345,6 +369,9 @@ def exchange_loop():
     adena_before = None
     prev_brightness = None
     brightness_changed = False
+    exchange_pixel_xy: tuple[int, int] | None = None
+    exchange_pixel_before: tuple[int, int, int] | None = None
+    exchange_pixel_changed = False
     _last_type_string_time = 0
     _last_status_print_time = 0
     _last_potion_idx_time: dict = {}
@@ -412,7 +439,8 @@ def exchange_loop():
                 was_low_mp = True
                 if macro.turn_to(macro.low_count_direction):
                     print(f"[server] 저MP 감지 -> {macro.low_count_direction}")
-                if time.time() - _last_type_string_time >= 16:
+                    macro.arduino_type_string("죄송합니다. 마나회복중입니다.")
+                if time.time() - _last_type_string_time >= 20:
                     macro.arduino_type_string("죄송합니다. 마나회복중입니다.")
                     _last_type_string_time = time.time()
                 time.sleep(0.5)
@@ -433,7 +461,7 @@ def exchange_loop():
 
             if time.time() - _last_type_string_time >= 10:
                 _ad_formats = [
-                    f"1방 {macro.adena_per_pickup}원 6방 {macro.adena_per_pickup * 6}원",
+                    macro.get_adena_price_notice(),
                 ]
                 macro.arduino_type_string(random.choice(_ad_formats))
                 _last_type_string_time = time.time()
@@ -497,10 +525,15 @@ def exchange_loop():
                 time.sleep(0.5)
                 continue
             adena_before = macro.readAdena()
+            exchange_pixel_xy = _load_exchange_pixel_check_xy()
+            exchange_pixel_before = _read_exchange_check_pixel(macro.screenshot(), exchange_pixel_xy)
+            exchange_pixel_changed = False
+            if exchange_pixel_xy is not None:
+                print(f"[server] 거래 확인 픽셀 기준: xy={exchange_pixel_xy}, rgb={exchange_pixel_before}")
             macro._arduino_send(f'KP,{win32con.VK_F7}')
             stage = MONITOR_BRIGHTNESS
 
-        # ── Stage 3: 슬롯 밝기 감시 → 변화 시 교환 수락 ────────────────────
+        # ── Stage 3: 슬롯 밝기 감시 → 임계값 초과 시 교환 수락 ─────────────
         elif stage == MONITOR_BRIGHTNESS:
             img = macro.screenshot()
             if not macro.readExchangeNickname(img):
@@ -511,7 +544,35 @@ def exchange_loop():
             brightness = macro.get_brightness(slot)
             print(f"[server] 슬롯 밝기: {brightness:.2f}")
 
-            if prev_brightness is not None and brightness != prev_brightness:
+            if exchange_pixel_xy is not None and exchange_pixel_before is not None and not exchange_pixel_changed:
+                current_pixel = _read_exchange_check_pixel(img, exchange_pixel_xy)
+                exchange_pixel_changed = current_pixel != exchange_pixel_before
+                if exchange_pixel_changed:
+                    print(
+                        f"[server] 거래 확인 픽셀 변화: xy={exchange_pixel_xy}, "
+                        f"{exchange_pixel_before} -> {current_pixel}"
+                    )
+
+            if not brightness_changed and brightness > EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD:
+                if exchange_pixel_xy is not None and not exchange_pixel_changed:
+                    print(
+                        f"[server] 슬롯 밝기 {brightness:.2f} > {EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD:.1f}, "
+                        f"거래 확인 픽셀 변화 없음 -> ESC"
+                    )
+                    macro.key_press(win32con.VK_ESCAPE)
+                    time.sleep(0.2)
+                    macro.arduino_type_string("거래가 취소되었습니다. 다시 부탁드리겠습니다.")
+                    _last_type_string_time = time.time()
+                    stage = WAIT_NICKNAME
+                    greeted_nickname = None
+                    adena_before = None
+                    prev_brightness = None
+                    brightness_changed = False
+                    exchange_pixel_before = None
+                    exchange_pixel_changed = False
+                    time.sleep(0.5)
+                    continue
+
                 brightness_changed = True
                 macro.acceptExchange()
             prev_brightness = brightness
@@ -527,6 +588,8 @@ def exchange_loop():
                 adena_before = None
                 prev_brightness = None
                 brightness_changed = False
+                exchange_pixel_before = None
+                exchange_pixel_changed = False
                 continue
 
             print(f"[server] 아데나 변화 감지: {adena_before} → {adena_after} (slot_changed={brightness_changed})")
@@ -538,9 +601,11 @@ def exchange_loop():
                 adena_before = None
                 prev_brightness = None
                 brightness_changed = False
+                exchange_pixel_before = None
+                exchange_pixel_changed = False
                 continue
 
-            pickup_count = int(received // macro.adena_per_pickup)
+            pickup_count = macro.get_pickup_count_for_adena(received)
 
             # 핑 스레드의 concurrent 업데이트와 격리하기 위해 available을 별도 dict로 복사
             # clients_snapshot은 shallow copy라 핑 스레드가 동일 dict를 수정하므로,
@@ -608,6 +673,8 @@ def exchange_loop():
             adena_before = None
             prev_brightness = None
             brightness_changed = False
+            exchange_pixel_before = None
+            exchange_pixel_changed = False
 
 
 # ── 진입점 ────────────────────────────────────────────────────────────────────

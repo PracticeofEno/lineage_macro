@@ -10,6 +10,8 @@
     "low_count_direction": "southeast",
     "high_count_direction": "northwest",
 
+    "blocked_list": [],
+
     "turn_north_xy":     [654, 292],
     "turn_northeast_xy": [816, 302],
     "turn_east_xy":      [770, 394],

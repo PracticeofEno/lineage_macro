@@ -170,6 +170,30 @@ def _send_pickup(client: dict, nickname: str | None = None) -> bool:
         return False
 
 
+# ── 좌표 이동 브로드캐스트 ────────────────────────────────────────────────────
+_client_coord_direction: str | None = None  # 마지막으로 클라이언트에 반영된 방향
+_BLOCKED_AVOID_DIRS = ['southwest', 'west', 'northwest', 'north', 'northeast']
+
+
+def _broadcast_move_coord(from_dir: str, to_dir: str):
+    """방향 전환 시 모든 클라이언트에 좌표 이동 명령을 보내고 서버 자신도 적용."""
+    global _client_coord_direction
+    dx, dy = macro.DIRECTION_DELTAS[(from_dir, to_dir)]
+    _client_coord_direction = to_dir
+    if dx == 0 and dy == 0:
+        return
+    payload = {"cmd": "move_coord", "dx": dx, "dy": dy}
+    with _clients_lock:
+        clients = list(_clients)
+    for c in clients:
+        if "conn" not in c:
+            continue
+        with c["lock"]:
+            _send_json(c["conn"], payload)
+    macro.apply_coord_delta(dx, dy)
+    print(f"[server] 좌표 브로드캐스트: {from_dir} → {to_dir}  (dx={dx:+}, dy={dy:+})")
+
+
 # ── Exchange 루프 ──────────────────────────────────────────────────────────────
 def exchange_loop():
     global running
@@ -185,16 +209,10 @@ def exchange_loop():
     _last_status_print_time = 0
     _last_potion_idx_time: dict = {}
     clients_snapshot = []
-    prev_stage = None
+    _last_target_text = ''
+    _last_target_first_seen = 0.0
 
     while running:
-        # 이전 stage가 READ_ADENA 이상이었을 경우 WAIT_NICKNAME 복귀 시 TAB + 타겟 리셋
-        if stage != prev_stage:
-            if stage == WAIT_NICKNAME and prev_stage is not None and prev_stage >= READ_ADENA:
-                macro.key_press(win32con.VK_TAB)
-                time.sleep(0.3)
-            prev_stage = stage
-
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
             img = macro.screenshot(hwnd=macro.lineage1_hwnd)
@@ -231,22 +249,24 @@ def exchange_loop():
                 if macro.current_direction != macro.low_count_direction:
                     macro.force_set_foreground_window(macro.lineage1_hwnd)
                     macro._DIRECTION_FUNCS[macro.low_count_direction]()
+                    # low_count_direction 전환: 클라이언트 좌표 이동 없음
                     time.sleep(1)
                 time.sleep(0.5)
                 continue
             else:
                 if macro.current_direction != macro.high_count_direction:
+                    from_dir = _client_coord_direction or macro.current_direction
                     macro.force_set_foreground_window(macro.lineage1_hwnd)
                     time.sleep(1)
                     macro._DIRECTION_FUNCS[macro.high_count_direction]()
+                    _broadcast_move_coord(from_dir, macro.high_count_direction)
                     time.sleep(1)
 
-            if time.time() - _last_type_string_time >= 8:
+            if time.time() - _last_type_string_time >= 14:
                 _ad_formats = [
-                    f"\\f2헤이 {macro.adena_per_pickup} \\f={total_count}방 !",
-                    f"\\f2{total_count}방 가능 \\f=한방에 {macro.adena_per_pickup}아데나!",
-                    f"\\f2헤이 {macro.adena_per_pickup} \\f= 6방 {macro.adena_per_pickup * 6}",
-                    f"\\f2{macro.adena_per_pickup}에 {total_count}방 ㄱㄱ",
+                    f"헤이 {macro.adena_per_pickup} {total_count}방 !",
+                    f"{total_count}방 가능 한방에 {macro.adena_per_pickup}아데나!",
+                    f"헤이 {macro.adena_per_pickup}  6방 {macro.adena_per_pickup * 6}",
                 ]
                 macro.arduino_type_string(random.choice(_ad_formats))
                 _last_type_string_time = time.time()
@@ -258,8 +278,32 @@ def exchange_loop():
                 stage = READ_ADENA
                 continue
 
-            if macro.has_target_in_input():
-                macro._arduino_send(f'KP,{win32con.VK_F7}')
+            input_text = macro.has_target_in_input()
+            if input_text:
+                if input_text in macro.blocked_list:
+                    candidates = [d for d in _BLOCKED_AVOID_DIRS if d != macro.current_direction]
+                    new_dir = random.choice(candidates)
+                    from_dir = _client_coord_direction or macro.current_direction
+                    macro.force_set_foreground_window(macro.lineage1_hwnd)
+                    macro._DIRECTION_FUNCS[new_dir]()
+                    _broadcast_move_coord(from_dir, new_dir)
+                    print(f"[server] blocked 감지 ({input_text}) → 방향 전환: {new_dir}")
+                    _last_target_text = ''
+                    _last_target_first_seen = 0.0
+                else:
+                    if input_text == _last_target_text:
+                        if time.time() - _last_target_first_seen >= 60:
+                            macro.add_to_blocked_list(input_text)
+                            print(f"[server] 60초 지속 타겟 → blocked_list 자동 추가: {input_text}")
+                            _last_target_text = ''
+                            _last_target_first_seen = 0.0
+                    else:
+                        _last_target_text = input_text
+                        _last_target_first_seen = time.time()
+                    macro._arduino_send(f'KP,{win32con.VK_F7}')
+            else:
+                _last_target_text = ''
+                _last_target_first_seen = 0.0
             time.sleep(0.5)
 
         # ── Stage 2: 교환 전 아데나 1회 측정 ────────────────────────────────
@@ -274,8 +318,19 @@ def exchange_loop():
         # ── Stage 3: 슬롯 밝기 감시 → 변화 시 교환 수락 ────────────────────
         elif stage == MONITOR_BRIGHTNESS:
             img = macro.screenshot()
-            if not macro.readExchangeNickname(img):
+            nickname = macro.readExchangeNickname(img)
+            if not nickname:
                 stage = PICKUP
+                continue
+
+            if nickname in macro.blocked_list:
+                print(f"[server] blocked 닉네임 감지 ({nickname}) → 교환 거절")
+                macro.rejectExchange()
+                stage = WAIT_NICKNAME
+                greeted_nickname = None
+                adena_before = None
+                prev_brightness = None
+                brightness_changed = False
                 continue
 
             slot = macro.crop(img, 258, 677, 30, 30)
@@ -372,6 +427,7 @@ def exchange_loop():
 # ── 진입점 ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     macro.init_setting("server")
+    _client_coord_direction = macro.current_direction
 
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

@@ -71,6 +71,12 @@ def _handle_command(msg: dict) -> dict | None:
         macro.use_potion()
         return {"status": "ok"}
 
+    if cmd == "move_coord":
+        dx, dy = msg.get("dx", 0), msg.get("dy", 0)
+        macro.apply_coord_delta(dx, dy)
+        print(f"[client] 좌표 이동 수신: dx={dx:+}, dy={dy:+}")
+        return {"status": "ok"}
+
     print(f"[client] 알 수 없는 명령: {msg}")
     return None
 

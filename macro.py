@@ -280,6 +280,28 @@ _TURN_XY = {
     'northwest': (542, 272),
 }
 
+# 북(north) 기준 각 방향의 픽업 좌표 오프셋 (dx, dy)
+_DIR_OFFSETS: dict[str, tuple[int, int]] = {
+    'north':     (0,    0),
+    'northeast': (40,   20),
+    'east':      (80,   40),
+    'southeast': (40,   60),
+    'south':     (0,    80),
+    'southwest': (-40,  60),
+    'west':      (-80,  40),
+    'northwest': (-40,  20),
+}
+
+# 모든 방향 쌍 간의 델타 (from_dir → to_dir)
+DIRECTION_DELTAS: dict[tuple[str, str], tuple[int, int]] = {
+    (frm, to): (
+        _DIR_OFFSETS[to][0] - _DIR_OFFSETS[frm][0],
+        _DIR_OFFSETS[to][1] - _DIR_OFFSETS[frm][1],
+    )
+    for frm in _DIR_OFFSETS
+    for to in _DIR_OFFSETS
+}
+
 def turn_north():
     global current_direction
     arduino_mouse_shift_click_left(*_TURN_XY['north'])
@@ -325,7 +347,29 @@ def arduino_init_cursor():
     """커서를 화면 (0, 0) 으로 초기화한다. 프로그램 시작 시 한 번 호출 권장."""
     _arduino_send('INIT')
 
+
+def apply_coord_delta(dx: int, dy: int):
+    """서버 방향 전환 시 픽업 좌표를 이동시킨다."""
+    _mouse_xy[0] += dx
+    _mouse_xy[1] += dy
+    print(f"[macro] 좌표 이동 적용: dx={dx:+}, dy={dy:+} → {_mouse_xy}")
+
+
+def add_to_blocked_list(nickname: str):
+    """blocked_list에 닉네임을 추가하고 macro_data.json에 저장한다."""
+    if nickname in blocked_list:
+        return
+    blocked_list.append(nickname)
+    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
+    with open(data_path, encoding="utf-8") as f:
+        data = json.load(f)
+    data["blocked_list"] = blocked_list
+    with open(data_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+    print(f"[macro] blocked_list 추가: {nickname} → {blocked_list}")
+
 _mouse_key: str | None = None
+_mouse_xy: list[int] = [0, 0]  # 런타임 픽업 좌표 (방향 전환 시 갱신)
 current_direction = 'north'
 available_count_1 = 0
 mp_1 = 0
@@ -333,6 +377,7 @@ direction_threshold = 4
 adena_per_pickup = 150
 low_count_direction = 'southeast'
 high_count_direction = 'northwest'
+blocked_list: list[str] = []
 exchange_yes_button = (869, 914)  # 교환 수락 Yes 좌표
 exchange_no_button = (917, 912)   # 교환 수락 No 좌표
 _exchange_nickname_xy: tuple[int, int] | None = None
@@ -439,17 +484,20 @@ def init_setting(role: str):
         mouse_key = "client_numbering_mouse_x_y"
 
     _mouse_key = mouse_key
+    _mouse_xy[:] = data[mouse_key]
 
     direction_threshold = data["direction_threshold"]
     adena_per_pickup = data["adena_per_pickup"]
     current_direction = data["current_direction"]
     low_count_direction = data["low_count_direction"]
     high_count_direction = data["high_count_direction"]
+    blocked_list[:] = data.get("blocked_list", [])
     for d in ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest']:
         _TURN_XY[d] = tuple(data[f"turn_{d}_xy"])
 
-    print(f"[macro] mouse_key={mouse_key}")
+    print(f"[macro] mouse_key={mouse_key}, mouse_xy={_mouse_xy}")
     print(f"[macro] direction_threshold={direction_threshold}, current={current_direction}, low={low_count_direction}, high={high_count_direction}")
+    print(f"[macro] blocked_list={blocked_list}")
     print(f"[macro] turn_xy={_TURN_XY}")
 
 
@@ -498,17 +546,20 @@ def init_custom_hwnd(title: str, role: str = "client"):
         mouse_key = "client_numbering_mouse_x_y"
 
     _mouse_key = mouse_key
+    _mouse_xy[:] = data[mouse_key]
 
     direction_threshold = data["direction_threshold"]
     adena_per_pickup = data["adena_per_pickup"]
     current_direction = data["current_direction"]
     low_count_direction = data["low_count_direction"]
     high_count_direction = data["high_count_direction"]
+    blocked_list[:] = data.get("blocked_list", [])
     for d in ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest']:
         _TURN_XY[d] = tuple(data[f"turn_{d}_xy"])
 
-    print(f"[macro] mouse_key={mouse_key}")
+    print(f"[macro] mouse_key={mouse_key}, mouse_xy={_mouse_xy}")
     print(f"[macro] direction_threshold={direction_threshold}, current={current_direction}, low={low_count_direction}, high={high_count_direction}")
+    print(f"[macro] blocked_list={blocked_list}")
     print(f"[macro] turn_xy={_TURN_XY}")
 
 
@@ -610,10 +661,7 @@ def use_potion():
 
 
 def pickup_lineage1(target_nickname: str | None = None):
-    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
-    with open(data_path, encoding="utf-8") as f:
-        data = json.load(f)
-    x, y = tuple(data[_mouse_key])
+    x, y = _mouse_xy
     force_set_foreground_window(lineage1_hwnd)
     win32api.SetCursorPos((x, y))
     time.sleep(0.1)
@@ -712,6 +760,17 @@ def acceptExchange():
     time.sleep(0.3)
 
 
+def rejectExchange():
+    win32api.SetCursorPos((311, 752))
+    time.sleep(0.5)
+    _arduino_send('CL')
+    time.sleep(0.5)
+    arduino_key_press(ord('Y'))
+    time.sleep(0.1)
+    _arduino_send(f'KP,{win32con.VK_RETURN}')
+    time.sleep(0.3)
+
+
 def findExchangeNicknameY(img=None) -> tuple[int, int] | None:
     """y=480에서 50까지 스캔하며 닉네임 텍스트가 처음 발견되는 (x, y) 좌표를 반환한다."""
     if img is None:
@@ -733,17 +792,9 @@ def readInputText(img=None) -> str:
     return read_text(img, 249, 933, (0xff, 0xff, 0xff)).replace('|', '')
 
 
-_pickup_xy: tuple[int, int] | None = None
-
-def has_target_in_input() -> bool:
-    """shift+우클릭으로 타겟 확인 후 입력창 초기화, 타겟이 있으면 True 반환"""
-    global _pickup_xy
-    if _pickup_xy is None:
-        data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
-        with open(data_path, encoding="utf-8") as f:
-            data = json.load(f)
-        _pickup_xy = tuple(data[_mouse_key])
-    x, y = _pickup_xy
+def has_target_in_input() -> str:
+    """shift+우클릭으로 타겟 확인 후 입력창 초기화. 타겟 텍스트 반환 (없으면 빈 문자열)"""
+    x, y = _mouse_xy
     win32api.SetCursorPos((x, y))
     arduino_mouse_shift_click_right(x, y)
     time.sleep(0.1)
@@ -753,7 +804,7 @@ def has_target_in_input() -> bool:
     arduino_key_press(win32con.VK_BACK)
     arduino_key_up(win32con.VK_CONTROL)
     time.sleep(0.1)
-    return bool(input_text)
+    return input_text
 
 
 def monitor_chat():

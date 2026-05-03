@@ -32,6 +32,8 @@ adena_per_pickup: int = 150
 low_count_direction: str = "southeast"
 high_count_direction: str = "northwest"
 POTION_COOLDOWN = 600
+PREFERRED_RANDOM_TURN_DIRECTIONS = {"northeast", "southeast", "southwest", "northwest"}
+PREFERRED_RANDOM_TURN_WEIGHT = 0.75
 
 WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(4)
 
@@ -67,7 +69,16 @@ def _change_direction(char: dict, direction: str):
 
 def _change_to_random_direction(char: dict):
     directions = [d for d in _cfg["turn_x_y_by_direction"] if d != char["direction"]]
-    _change_direction(char, random.choice(directions))
+    preferred = [d for d in directions if d in PREFERRED_RANDOM_TURN_DIRECTIONS]
+    remaining = [d for d in directions if d not in PREFERRED_RANDOM_TURN_DIRECTIONS]
+
+    if preferred and remaining:
+        directions = preferred if random.random() < PREFERRED_RANDOM_TURN_WEIGHT else remaining
+    else:
+        directions = preferred or remaining
+
+    if directions:
+        _change_direction(char, random.choice(directions))
 
 
 def _is_blocked_text(text: str) -> bool:

@@ -204,7 +204,14 @@ def _reset_state(state: dict):
     state["non_preferred_direction_since"] = 0.0
 
 
-def _step_char(char: dict, state: dict, label: str):
+def _type_chat(char: dict, text: str):
+    with _fg_lock:
+        _set_context(char)
+        macro.force_set_foreground_window(char["hwnd"])
+        macro.arduino_type_string(text)
+
+
+def _step_char(char: dict, state: dict, label: str) -> bool:
     stage = state["stage"]
 
     # ── Stage 1: 광고 / 닉네임 대기 ─────────────────────────────────────────
@@ -220,10 +227,8 @@ def _step_char(char: dict, state: dict, label: str):
 
         if time.time() - state["last_ad_time"] >= 12:
             a = char["available"]
-            with _fg_lock:
-                macro.force_set_foreground_window(char["hwnd"])
             if a < 3:
-                macro.arduino_type_string(f"엠탐.. {char['available']}/3")
+                _type_chat(char, f"엠탐.. {char['available']}/3")
                 # _low_mp_formats = [
                     # f"엠탐.. {char['available']}/3",
                     # f"잠시만요.. {char['available']}/3",
@@ -234,8 +239,9 @@ def _step_char(char: dict, state: dict, label: str):
                 _ad_formats = [
                     f"헤이 {adena_per_pickup} {a}방 가능!",
                 ]
-                macro.arduino_type_string(random.choice(_ad_formats))
+                _type_chat(char, random.choice(_ad_formats))
             state["last_ad_time"] = time.time()
+            return True
 
         _set_context(char)
         img = macro.screenshot(hwnd=char["hwnd"])
@@ -347,14 +353,12 @@ def _step_char(char: dict, state: dict, label: str):
             return
 
         # 픽업 완료
-        with _fg_lock:
-            _set_context(char)
-            macro.force_set_foreground_window(char["hwnd"])
         time.sleep(0.1)
-        macro.arduino_type_string(f"감삼당~")
+        _type_chat(char, f"감삼당~")
         time.sleep(0.3)
         _restore_high_count_direction(char)
         _reset_state(state)
+        return True
 
 
 def exchange_loop():
@@ -381,8 +385,12 @@ def exchange_loop():
         _manage_direction(server_char)
         _manage_direction(client_char)
 
-        _step_char(server_char, server_state, "server")
-        _step_char(client_char, client_state, "client")
+        if _step_char(server_char, server_state, "server"):
+            time.sleep(0.5)
+            continue
+        if _step_char(client_char, client_state, "client"):
+            time.sleep(0.5)
+            continue
 
         time.sleep(0.5)
 

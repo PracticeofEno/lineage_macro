@@ -211,6 +211,16 @@ def _type_chat(char: dict, text: str):
         macro.arduino_type_string(text)
 
 
+def _read_exchange_nickname(char: dict, img) -> str:
+    if char.get("exchange_nickname_xy") is None:
+        xy = macro.findExchangeNicknameY(img)
+        if xy is None:
+            return ''
+        char["exchange_nickname_xy"] = xy
+    _, y = char["exchange_nickname_xy"]
+    return macro._read_exchange_nickname_img(img, y)
+
+
 def _step_char(char: dict, state: dict, label: str) -> bool:
     stage = state["stage"]
 
@@ -229,12 +239,6 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
             a = char["available"]
             if a < 3:
                 _type_chat(char, f"엠탐.. {char['available']}/3")
-                # _low_mp_formats = [
-                    # f"엠탐.. {char['available']}/3",
-                    # f"잠시만요.. {char['available']}/3",
-                # ]
-                # macro.arduino_type_string(f"엠탐.. {char['available']}/3")
-                # state["low_mp_ad_idx"] += 1
             else:
                 _ad_formats = [
                     f"헤이 {adena_per_pickup} {a}방 가능!",
@@ -243,16 +247,16 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
             state["last_ad_time"] = time.time()
             return True
 
-        _set_context(char)
+        with _fg_lock:
+            _set_context(char)
+            macro.force_set_foreground_window(char["hwnd"])
         img = macro.screenshot(hwnd=char["hwnd"])
-        nickname = macro.readExchangeNickname(img=img)
+        nickname = _read_exchange_nickname(char, img)
         if nickname:
             state["greeted_nickname"] = nickname
             state["stage"] = READ_ADENA
             return
 
-        with _fg_lock:
-            macro.force_set_foreground_window(char["hwnd"])
         has_target, input_text = macro.has_target_in_input(
             _pickup_xy(char),
             label=label,
@@ -284,7 +288,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
     elif stage == READ_ADENA:
         _set_context(char)
         img = macro.screenshot(hwnd=char["hwnd"])
-        if not macro.readExchangeNickname(img):
+        if not _read_exchange_nickname(char, img):
             _reset_state(state)
             return
         state["adena_before"] = macro.readAdena()
@@ -295,7 +299,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
     elif stage == MONITOR_BRIGHTNESS:
         _set_context(char)
         img = macro.screenshot()
-        nickname = macro.readExchangeNickname(img)
+        nickname = _read_exchange_nickname(char, img)
         if not nickname:
             state["stage"] = PICKUP
             return
@@ -406,8 +410,8 @@ if __name__ == "__main__":
     init_direction = _cfg["current_direction"]
     print(f"direction: {init_direction}, low: {low_count_direction}, high: {high_count_direction}")
 
-    server_char = {"hwnd": _find_hwnd("server"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0,  "direction_initialized": False, "potion_last_used": 0.0}
-    client_char = {"hwnd": _find_hwnd("client"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0, "direction_initialized": False, "potion_last_used": 0.0}
+    server_char = {"hwnd": _find_hwnd("server"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0,  "direction_initialized": False, "potion_last_used": 0.0, "exchange_nickname_xy": None}
+    client_char = {"hwnd": _find_hwnd("client"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0, "direction_initialized": False, "potion_last_used": 0.0, "exchange_nickname_xy": None}
 
     print("\n명령어: q=종료, 1=exchange 시작, 2=exchange 중지")
     exchange_thread = None

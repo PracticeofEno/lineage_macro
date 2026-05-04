@@ -285,7 +285,6 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
         if nickname:
             state["greeted_nickname"] = nickname
             state["stage"] = READ_ADENA
-            return
 
         has_target, input_text = has_target_in_input(
             _pickup_xy(char),

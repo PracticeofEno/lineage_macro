@@ -150,12 +150,15 @@ void processCommand(const String &cmd) {
 
         if (action == "KD") {
             Keyboard.press(hid);
+            delay(30);
         } else if (action == "KU") {
             Keyboard.release(hid);
+            delay(30);
         } else {  // KP
             Keyboard.press(hid);
-            delay(10);
+            delay(30);
             Keyboard.release(hid);
+            delay(30);
         }
 
     // ── 백스페이스 n 회 ──
@@ -163,9 +166,9 @@ void processCommand(const String &cmd) {
         int n = rest.toInt();
         for (int i = 0; i < n; i++) {
             Keyboard.press(HID_KEY_BACKSPACE);
-            delay(10);
+            delay(30);
             Keyboard.release(HID_KEY_BACKSPACE);
-            delay(10);
+            delay(30);
         }
 
     // ── 마우스 이동 ──
@@ -182,7 +185,7 @@ void processCommand(const String &cmd) {
             int x  = rest.substring(0, c2).toInt();
             int y  = rest.substring(c2 + 1).toInt();
             moveTo(x, y);
-            delay(10);
+            delay(30);
         }
         Mouse.press(MOUSE_LEFT);
         delay(50);

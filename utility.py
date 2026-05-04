@@ -134,8 +134,11 @@ def _arduino_send(cmd: str) -> str:
         return buf.split(b'\n')[0].decode().strip()
 
 def set_forground_window(hwnd: int):
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE
+    windll.user32.keybd_event(0, 0, 0, 0)  # null 입력으로 포그라운드 권한 획득
     win32gui.SetForegroundWindow(hwnd)
-    time.sleep(0.1)
+    time.sleep(0.05)
 
 def find_hwnd(title: str) -> int:
     result = []

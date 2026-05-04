@@ -298,7 +298,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
     # ── Stage 3: 슬롯 밝기 감시 → 변화 시 교환 수락 ─────────────────────────
     elif stage == MONITOR_BRIGHTNESS:
         _set_context(char)
-        img = macro.screenshot()
+        img = macro.screenshot(hwnd=char["hwnd"])
         nickname = _read_exchange_nickname(char, img)
         if not nickname:
             state["stage"] = PICKUP
@@ -334,8 +334,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
     elif stage == PICKUP:
         if not state["brightness_changed"]:
             _set_context(char)
-            macro.key_press(win32con.VK_TAB)
-            time.sleep(0.3)
+            time.sleep(0.1)
             _restore_high_count_direction(char)
             _reset_state(state)
             return
@@ -360,7 +359,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
         # 픽업 완료
         time.sleep(0.1)
         _type_chat(char, f"감삼당~")
-        time.sleep(0.3)
+        time.sleep(0.1)
         _restore_high_count_direction(char)
         _reset_state(state)
         return True

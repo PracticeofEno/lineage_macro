@@ -370,7 +370,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
 
         # 픽업 1회 실행 후 return → 상대방 차례 양보
         if state["pickups_remaining"] > 0:
-            if time.time() - char.get("last_pickup_time", 0.0) < 0.5:
+            if time.time() - char.get("last_pickup_time", 0.0) < 1:
                 return
             print(f"[{label}] 픽업 실행 (남은: {state['pickups_remaining']})")
             _pickup(char, state["greeted_nickname"])

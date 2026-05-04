@@ -321,8 +321,9 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
             if state["available_at_exchange"] is None:
                 state["available_at_exchange"] = int(char["available"])
             with _fg_lock:
+                _set_context(char)
                 macro.force_set_foreground_window(char["hwnd"])
-            macro.acceptExchange()
+                macro.acceptExchange()
         state["prev_brightness"] = brightness
 
     # ── Stage 4: 픽업 ────────────────────────────────────────────────────────

@@ -361,7 +361,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
 
         # 최초 진입: 아데나 측정 후 지급 횟수 계산
         if state["pickups_remaining"] is None:
-            adena_after = utility.readAdena()
+            adena_after = utility.readAdena(hwnd=char["hwnd"])
             received = adena_after - state["adena_before"]
             paid_pickups = max(0, int(received // adena_per_pickup))
             available_at_exchange = int(state["available_at_exchange"])

@@ -764,9 +764,8 @@ def has_target_in_input(
     time.sleep(0.1)
     img = screenshot(hwnd=hwnd)
     input_text = readInputText(img)
-    arduino_key_down(win32con.VK_CONTROL)
-    arduino_key_press(win32con.VK_BACK)
-    arduino_key_up(win32con.VK_CONTROL)
+    for temp in range(10):
+        arduino_key_press(win32con.VK_BACK)
     time.sleep(0.1)
     has_target = bool(input_text)
     if return_text:

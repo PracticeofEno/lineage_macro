@@ -370,8 +370,11 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
 
         # 픽업 1회 실행 후 return → 상대방 차례 양보
         if state["pickups_remaining"] > 0:
+            if time.time() - char.get("last_pickup_time", 0.0) < 0.5:
+                return
             print(f"[{label}] 픽업 실행 (남은: {state['pickups_remaining']})")
             _pickup(char, state["greeted_nickname"])
+            char["last_pickup_time"] = time.time()
             state["pickups_remaining"] -= 1
             return
 
@@ -409,8 +412,8 @@ if __name__ == "__main__":
     init_direction = _cfg["current_direction"]
     print(f"direction: {init_direction}, low: {low_count_direction}, high: {high_count_direction}")
 
-    server_char = {"hwnd": utility.find_hwnd("server"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0,  "direction_initialized": False, "potion_last_used": 0.0, "exchange_nickname_xy": None}
-    client_char = {"hwnd": utility.find_hwnd("client"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0, "direction_initialized": False, "potion_last_used": 0.0, "exchange_nickname_xy": None}
+    server_char = {"hwnd": utility.find_hwnd("server"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0,  "direction_initialized": False, "potion_last_used": 0.0, "last_pickup_time": 0.0, "exchange_nickname_xy": None}
+    client_char = {"hwnd": utility.find_hwnd("client"), "mp": 0, "available": 0, "direction": init_direction, "direction_threshold": 0, "direction_initialized": False, "potion_last_used": 0.0, "last_pickup_time": 0.0, "exchange_nickname_xy": None}
 
     print("\n명령어: q=종료, 1=exchange 시작, 2=exchange 중지")
     exchange_thread = None

@@ -219,6 +219,7 @@ def _make_state() -> dict:
         "non_preferred_direction_since": 0.0,
         "last_target_check": 0.0,
         "last_status_print_time": 0.0,
+        "monitor_brightness_since": 0.0,
     }
 
 
@@ -231,6 +232,7 @@ def _reset_state(state: dict):
     state["pickups_remaining"] = None
     state["available_at_exchange"] = None
     state["non_preferred_direction_since"] = 0.0
+    state["monitor_brightness_since"] = 0.0
 
 
 def _type_chat(char: dict, text: str):
@@ -274,7 +276,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
                 _type_chat(char, f"엠탐.. {char['available']}/3")
             else:
                 _ad_formats = [
-                    f"헤이 {adena_per_pickup} {a}방 가능!",
+                    f"헤이{adena_per_pickup} {char['available']}/{char['direction_threshold']}",
                 ]
                 _type_chat(char, random.choice(_ad_formats))
             state["last_ad_time"] = time.time()
@@ -322,6 +324,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
         state["adena_before"] = utility.readAdena(hwnd=char["hwnd"])
         utility.arduino_key_press(win32con.VK_F7)
         state["stage"] = MONITOR_BRIGHTNESS
+        state["monitor_brightness_since"] = time.time()
 
     # ── Stage 3: 슬롯 밝기 감시 → 변화 시 교환 수락 ─────────────────────────
     elif stage == MONITOR_BRIGHTNESS:
@@ -329,6 +332,14 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
         nickname = _read_exchange_nickname(char, img)
         if not nickname:
             state["stage"] = PICKUP
+            return
+
+        if time.time() - state["monitor_brightness_since"] >= 120:
+            exchange_nickname = state["greeted_nickname"] or nickname
+            if _add_blocked_text(exchange_nickname):
+                print(f"[{label}] MONITOR_BRIGHTNESS 60s timeout -> blocked_list add: '{exchange_nickname}'")
+            rejectExchange()
+            _reset_state(state)
             return
 
         slot = utility.crop(img, 258, 677, 30, 30)

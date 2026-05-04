@@ -389,14 +389,9 @@ def exchange_loop():
         _manage_direction(server_char)
         _manage_direction(client_char)
 
-        if _step_char(server_char, server_state, "server"):
-            time.sleep(0.5)
-            continue
-        if _step_char(client_char, client_state, "client"):
-            time.sleep(0.5)
-            continue
-
-        time.sleep(0.5)
+        _step_char(server_char, server_state, "server")
+        _step_char(client_char, client_state, "client")
+        time.sleep(0.1)
 
 
 if __name__ == "__main__":

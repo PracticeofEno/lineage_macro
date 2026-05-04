@@ -532,9 +532,7 @@ def move_window(x: int, y: int):
     win32gui.MoveWindow(hwnd, x, y, width, height, True)
 
 
-def screenshot(filename: str = None, hwnd: int = None) -> Image.Image:
-    if hwnd is None:
-        hwnd = get_hwnd()
+def screenshot(hwnd: int = None) -> Image.Image:
     rect = win32gui.GetWindowRect(hwnd)
     w = int((rect[2] - rect[0]))
     h = int((rect[3] - rect[1]))
@@ -558,14 +556,6 @@ def screenshot(filename: str = None, hwnd: int = None) -> Image.Image:
     win32gui.ReleaseDC(hwnd, hwnd_dc)
 
     img = img.crop((0, 0, img.width - 16, img.height - 41))
-
-    if filename is None:
-        filename = datetime.now().strftime("%Y%m%d_%H%M%S") + ".png"
-
-    os.makedirs("image", exist_ok=True)
-    # path = os.path.join("image", filename)
-    # img.save(path)
-    # print(f"[macro] 스크린샷 저장됨: {path}")
     return img
 
 

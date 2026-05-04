@@ -280,6 +280,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
                 ]
                 _type_chat(char, random.choice(_ad_formats))
             state["last_ad_time"] = time.time()
+            time.sleep(0.3)
 
         nickname = _read_exchange_nickname(char, img)
         if nickname:

@@ -319,7 +319,7 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
         if not _read_exchange_nickname(char, img):
             _reset_state(state)
             return
-        state["adena_before"] = utility.readAdena()
+        state["adena_before"] = utility.readAdena(hwnd=char["hwnd"])
         utility.arduino_key_press(win32con.VK_F7)
         state["stage"] = MONITOR_BRIGHTNESS
 

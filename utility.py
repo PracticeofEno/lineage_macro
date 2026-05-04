@@ -226,10 +226,10 @@ def get_brightness(image: Image.Image) -> float:
     arr = np.array(image.convert('RGB'), dtype=np.float32)
     return float(arr.mean())
 
-def readAdena() -> int:
+def readAdena(hwnd: int) -> int:
     while True:
         arduino_key_press(win32con.VK_F9)
-        img = screenshot()
+        img = screenshot(hwnd=hwnd)
         cropped = crop(img, 228 + 60 + 5 + 5, 883, 500, 21)
         text = read_text(cropped, 0, 0, (0xFF, 0xF1, 0xB5))
         if '(' in text and ')' in text:

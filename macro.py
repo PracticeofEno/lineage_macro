@@ -604,7 +604,6 @@ def shake_mouse_small(count=10, dist=10, delay=0.05):
         time.sleep(delay)
 
 def use_potion():
-    force_set_foreground_window(lineage1_hwnd)
     time.sleep(0.5)
     _arduino_send(f'KP,{win32con.VK_F8}')
 
@@ -669,7 +668,6 @@ def readMp(img=None) -> int:
 
 
 def readAdena() -> int:
-    force_set_foreground_window(lineage1_hwnd)
     while True:
         key_press(win32con.VK_F9)
         img = screenshot()
@@ -749,6 +747,7 @@ _pickup_xy: tuple[int, int] | None = None
 def has_target_in_input(
     xy: tuple[int, int] | None = None,
     *,
+    hwnd,
     label: str | None = None,
     return_text: bool = False,
 ) -> bool | tuple[bool, str]:
@@ -763,7 +762,7 @@ def has_target_in_input(
     win32api.SetCursorPos((x, y))
     arduino_mouse_shift_click_right(x, y)
     time.sleep(0.1)
-    img = screenshot(hwnd=lineage1_hwnd)
+    img = screenshot(hwnd=hwnd)
     input_text = readInputText(img)
     arduino_key_down(win32con.VK_CONTROL)
     arduino_key_press(win32con.VK_BACK)

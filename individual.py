@@ -17,7 +17,6 @@ import win32gui
 
 import macro
 
-_fg_lock = threading.Lock()
 running = True
 
 server_char: dict = {}
@@ -50,21 +49,14 @@ def _find_hwnd(title: str) -> int:
     return result[0]
 
 
-def _set_context(char: dict):
-    macro.lineage1_hwnd = char["hwnd"]
-    macro.current_direction = char["direction"]
-
-
 def _pickup_xy(char: dict) -> tuple[int, int]:
     return tuple(_cfg["mouse_x_y_by_direction"][char["direction"]])
 
 
 def _change_direction(char: dict, direction: str):
-    with _fg_lock:
-        _set_context(char)
-        macro.force_set_foreground_window(char["hwnd"])
-        x, y = _cfg["turn_x_y_by_direction"][direction]
-        macro.arduino_mouse_shift_click_left(x, y)
+    macro.force_set_foreground_window(char["hwnd"])
+    x, y = _cfg["turn_x_y_by_direction"][direction]
+    macro.arduino_mouse_shift_click_left(x, y)
     char["direction"] = direction
 
 
@@ -109,35 +101,33 @@ def _add_blocked_text(text: str) -> bool:
 
 
 def _pickup(char: dict, nickname: str | None):
-    with _fg_lock:
-        _set_context(char)
-        x, y = _pickup_xy(char)
-        macro.force_set_foreground_window(char["hwnd"])
-        win32api.SetCursorPos((x, y))
+    x, y = _pickup_xy(char)
+    win32api.SetCursorPos((x, y))
+    time.sleep(0.1)
+    for attempt in range(4):
+        macro.arduino_mouse_shift_click_right(x, y)
         time.sleep(0.1)
-        for attempt in range(4):
-            macro.arduino_mouse_shift_click_right(x, y)
-            time.sleep(0.1)
-            img = macro.screenshot(hwnd=char["hwnd"])
-            input_text = macro.readInputText(img)
-            print(f"[macro] 타겟 확인 ({attempt+1}/4): '{input_text}' == '{nickname}'?")
-            macro.arduino_key_down(win32con.VK_CONTROL)
-            macro.arduino_key_press(win32con.VK_BACK)
-            macro.arduino_key_up(win32con.VK_CONTROL)
-            time.sleep(0.1)
-            if input_text == nickname:
-                print("[macro] 타겟 고정 성공")
-                break
-        else:
-            print("[macro] 타겟 고정 실패 - pickup 진행")
-        macro.key_press(win32con.VK_F5)
+        img = macro.screenshot(hwnd=char["hwnd"])
+        input_text = macro.readInputText(img)
+        print(f"[macro] 타겟 확인 ({attempt+1}/4): '{input_text}' == '{nickname}'?")
+        macro.arduino_key_down(win32con.VK_CONTROL)
+        macro.arduino_key_press(win32con.VK_BACK)
+        macro.arduino_key_up(win32con.VK_CONTROL)
         time.sleep(0.1)
-        macro.mouse_click_left(x, y)
-        time.sleep(0.1)
+        if input_text == nickname:
+            print("[macro] 타겟 고정 성공")
+            break
+    else:
+        print("[macro] 타겟 고정 실패 - pickup 진행")
+    macro.key_press(win32con.VK_F5)
+    time.sleep(0.1)
+    macro.mouse_click_left(x, y)
+    time.sleep(0.1)
 
 
-def _update_mp(char: dict):
-    img = macro.screenshot(hwnd=char["hwnd"])
+def _update_mp(char: dict, img=None):
+    if img is None:
+        img = macro.screenshot(hwnd=char["hwnd"])
     mp = macro.readMp(img)
     if mp != 0:
         char["mp"] = mp
@@ -154,9 +144,7 @@ def _try_use_potion(char: dict, label: str) -> bool:
     if now - char.get("potion_last_used", 0.0) < POTION_COOLDOWN:
         return False
 
-    with _fg_lock:
-        _set_context(char)
-        macro.use_potion()
+    macro.use_potion()
     char["potion_last_used"] = now
     print(f"[{label}] 포션 사용 (available: {char['available']})")
     return True
@@ -190,6 +178,8 @@ def _make_state() -> dict:
         "available_at_exchange": None,
         "low_mp_ad_idx": 0,
         "non_preferred_direction_since": 0.0,
+        "last_target_check": 0.0,
+        "last_status_print_time": 0.0,
     }
 
 
@@ -205,10 +195,7 @@ def _reset_state(state: dict):
 
 
 def _type_chat(char: dict, text: str):
-    with _fg_lock:
-        _set_context(char)
-        macro.force_set_foreground_window(char["hwnd"])
-        macro.arduino_type_string(text)
+    macro.arduino_type_string(text)
 
 
 def _read_exchange_nickname(char: dict, img) -> str:
@@ -222,10 +209,18 @@ def _read_exchange_nickname(char: dict, img) -> str:
 
 
 def _step_char(char: dict, state: dict, label: str) -> bool:
+    macro.force_set_foreground_window(char["hwnd"])
     stage = state["stage"]
 
     # ── Stage 1: 광고 / 닉네임 대기 ─────────────────────────────────────────
     if stage == WAIT_NICKNAME:
+        img = macro.screenshot(hwnd=char["hwnd"])
+        _update_mp(char, img)
+        _try_use_potion(char, label)
+        if time.time() - state["last_status_print_time"] >= 3:
+            print(f"[{label}] MP: {char['mp']}, 잔여: {char['available']}, stage: {state['stage']}")
+            state["last_status_print_time"] = time.time()
+            
         now = time.time()
         if char["direction"] in PREFERRED_RANDOM_TURN_DIRECTIONS:
             state["non_preferred_direction_since"] = 0.0
@@ -247,18 +242,18 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
             state["last_ad_time"] = time.time()
             return True
 
-        with _fg_lock:
-            _set_context(char)
-            macro.force_set_foreground_window(char["hwnd"])
-        img = macro.screenshot(hwnd=char["hwnd"])
         nickname = _read_exchange_nickname(char, img)
         if nickname:
             state["greeted_nickname"] = nickname
             state["stage"] = READ_ADENA
             return
 
+        if time.time() - state["last_target_check"] < 0.3:
+            return
+        state["last_target_check"] = time.time()
         has_target, input_text = macro.has_target_in_input(
             _pickup_xy(char),
+            hwnd=char["hwnd"],
             label=label,
             return_text=True,
         )
@@ -286,7 +281,6 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
 
     # ── Stage 2: 교환 전 아데나 1회 측정 ─────────────────────────────────────
     elif stage == READ_ADENA:
-        _set_context(char)
         img = macro.screenshot(hwnd=char["hwnd"])
         if not _read_exchange_nickname(char, img):
             _reset_state(state)
@@ -297,7 +291,6 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
 
     # ── Stage 3: 슬롯 밝기 감시 → 변화 시 교환 수락 ─────────────────────────
     elif stage == MONITOR_BRIGHTNESS:
-        _set_context(char)
         img = macro.screenshot(hwnd=char["hwnd"])
         nickname = _read_exchange_nickname(char, img)
         if not nickname:
@@ -312,11 +305,8 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
         exchange_nickname = state["greeted_nickname"] or nickname
         if has_prev_brightness and _is_blocked_text(exchange_nickname):
             print(f"[{label}] blocked_list exchange nickname: '{exchange_nickname}' -> reject")
-            with _fg_lock:
-                _set_context(char)
-                macro.force_set_foreground_window(char["hwnd"])
-                macro.rejectExchange()
-                time.sleep(0.3)
+            macro.rejectExchange()
+            time.sleep(0.3)
             _reset_state(state)
             return
 
@@ -324,16 +314,12 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
             state["brightness_changed"] = True
             if state["available_at_exchange"] is None:
                 state["available_at_exchange"] = int(char["available"])
-            with _fg_lock:
-                _set_context(char)
-                macro.force_set_foreground_window(char["hwnd"])
-                macro.acceptExchange()
+            macro.acceptExchange()
         state["prev_brightness"] = brightness
 
     # ── Stage 4: 픽업 ────────────────────────────────────────────────────────
     elif stage == PICKUP:
         if not state["brightness_changed"]:
-            _set_context(char)
             time.sleep(0.1)
             _restore_high_count_direction(char)
             _reset_state(state)
@@ -341,7 +327,6 @@ def _step_char(char: dict, state: dict, label: str) -> bool:
 
         # 최초 진입: 아데나 측정 후 지급 횟수 계산
         if state["pickups_remaining"] is None:
-            _set_context(char)
             adena_after = macro.readAdena()
             received = adena_after - state["adena_before"]
             paid_pickups = max(0, int(received // adena_per_pickup))
@@ -370,21 +355,8 @@ def exchange_loop():
 
     server_state = _make_state()
     client_state = _make_state()
-    _last_status_print_time = 0.0
 
     while running:
-        _update_mp(server_char)
-        _update_mp(client_char)
-
-        if server_state["stage"] == WAIT_NICKNAME:
-            _try_use_potion(server_char, "server")
-        if client_state["stage"] == WAIT_NICKNAME:
-            _try_use_potion(client_char, "client")
-
-        if time.time() - _last_status_print_time >= 3:
-            print(f"[server] MP: {server_char['mp']}, 잔여: {server_char['available']}, stage: {server_state['stage']}")
-            print(f"[client] MP: {client_char['mp']}, 잔여: {client_char['available']}, stage: {client_state['stage']}")
-            _last_status_print_time = time.time()
 
         _manage_direction(server_char)
         _manage_direction(client_char)
@@ -419,8 +391,7 @@ if __name__ == "__main__":
             if exchange_thread and exchange_thread.is_alive():
                 print("[individual] exchange 이미 실행 중")
             else:
-                with _fg_lock:
-                    macro.force_set_foreground_window(server_char["hwnd"])
+                macro.force_set_foreground_window(server_char["hwnd"])
                 running = True
                 exchange_thread = threading.Thread(target=exchange_loop, daemon=True)
                 exchange_thread.start()

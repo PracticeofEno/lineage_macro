@@ -270,6 +270,14 @@ def exchange_loop():
 
     # 첫 방향 맞춰줌
     macro._DIRECTION_FUNCS[macro.high_count_direction]()
+    with _clients_lock:
+        clients = list(_clients)
+    for c in clients:
+        if "conn" not in c:
+            continue
+        with c["lock"]:
+            _send_json(c["conn"], {"cmd": "reset_coord"})
+    
 
     WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(4)
     stage = WAIT_NICKNAME

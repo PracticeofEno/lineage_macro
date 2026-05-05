@@ -261,7 +261,7 @@ def exchange_loop():
                 continue
             else:
                 if macro.current_direction == macro.low_count_direction:
-                    from_dir = _client_coord_direction or macro.current_direction
+                    from_dir = macro.current_direction
                     macro.force_set_foreground_window(macro.lineage1_hwnd)
                     time.sleep(1)
                     macro._DIRECTION_FUNCS[macro.high_count_direction]()
@@ -289,7 +289,7 @@ def exchange_loop():
                 if input_text in macro.blocked_list:
                     candidates = [d for d in _BLOCKED_AVOID_DIRS if d != macro.current_direction]
                     new_dir = random.choice(candidates)
-                    from_dir = _client_coord_direction or macro.current_direction
+                    from_dir = macro.current_direction
                     macro.force_set_foreground_window(macro.lineage1_hwnd)
                     macro._DIRECTION_FUNCS[new_dir]()
                     _broadcast_move_coord(from_dir, new_dir)

@@ -498,6 +498,12 @@ def exchange_loop():
                 # display_name = greeted_nickname[:2] if len(greeted_nickname) > 2 else greeted_nickname
                 macro.arduino_type_string(f"감삼당~!")
 
+            if macro.current_direction != macro.high_count_direction:
+                from_dir = macro.current_direction
+                macro.force_set_foreground_window(macro.lineage1_hwnd)
+                macro._DIRECTION_FUNCS[macro.high_count_direction]()
+                _broadcast_move_coord(from_dir, macro.high_count_direction)
+
             stage = WAIT_NICKNAME
             greeted_nickname = None
             adena_before = None

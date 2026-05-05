@@ -420,8 +420,8 @@ def exchange_loop():
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
             time.sleep(0.1)
             if received > 0:
-                display_name = greeted_nickname[:2] if len(greeted_nickname) > 2 else greeted_nickname
-                macro.arduino_type_string(f"{display_name}님 감사합니당~!")
+                # display_name = greeted_nickname[:2] if len(greeted_nickname) > 2 else greeted_nickname
+                macro.arduino_type_string(f"감삼당~!")
 
             stage = WAIT_NICKNAME
             greeted_nickname = None

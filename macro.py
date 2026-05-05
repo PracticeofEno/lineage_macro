@@ -688,7 +688,7 @@ def pickup_lineage1(target_nickname: str | None = None):
             print("[macro] 타겟 고정 성공")
             break
     else:
-        print("[macro] 타겟 고정 실패 - pickup 진행")
+        print(f"[macro] 타겟 고정 실패 - {x} , {y}")
 
     key_press(win32con.VK_F5)
     time.sleep(0.1)

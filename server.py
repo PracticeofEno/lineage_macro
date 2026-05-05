@@ -320,8 +320,9 @@ def exchange_loop():
             if total_count < macro.direction_threshold:
                 if macro.current_direction != macro.low_count_direction:
                     macro.force_set_foreground_window(macro.lineage1_hwnd)
+                    from_dir = macro.current_direction
                     macro._DIRECTION_FUNCS[macro.low_count_direction]()
-                    _broadcast_move_coord(from_dir, macro.high_count_direction)
+                    _broadcast_move_coord(from_dir, macro.low_count_direction)
                     time.sleep(1)
                 time.sleep(0.5)
                 continue

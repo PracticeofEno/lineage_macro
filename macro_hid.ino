@@ -133,18 +133,6 @@ void moveTo(int targetX, int targetY) {
     }
 }
 
-// ── 키 헬퍼 (press/release + 타임아웃 갱신) ─────────────────────────────────
-void safePress(int hid) {
-    Keyboard.press(hid);
-    lastCmdTime = millis();
-    inputsReleased = false;
-}
-
-void safeRelease(int hid) {
-    Keyboard.release(hid);
-    lastCmdTime = millis();
-}
-
 // ── 명령 파싱 및 실행 ────────────────────────────────────────────────────────
 void processCommand(const String &cmd) {
     if (cmd.length() == 0) return;
@@ -161,13 +149,16 @@ void processCommand(const String &cmd) {
         if (hid == -1) { Serial.println("ERR:UNKNOWN_VK"); return; }
 
         if (action == "KD") {
-            safePress(hid);
+            Keyboard.press(hid);
+            delay(30);
         } else if (action == "KU") {
-            safeRelease(hid);
+            Keyboard.release(hid);
+            delay(30);
         } else {  // KP
-            safePress(hid);
-            delay(10);
-            safeRelease(hid);
+            Keyboard.press(hid);
+            delay(30);
+            Keyboard.release(hid);
+            delay(30);
         }
 
     // ── 백스페이스 n 회 ──
@@ -175,9 +166,9 @@ void processCommand(const String &cmd) {
         int n = rest.toInt();
         for (int i = 0; i < n; i++) {
             Keyboard.press(HID_KEY_BACKSPACE);
-            delay(10);
+            delay(30);
             Keyboard.release(HID_KEY_BACKSPACE);
-            delay(10);
+            delay(30);
         }
 
     // ── 마우스 이동 ──
@@ -194,7 +185,7 @@ void processCommand(const String &cmd) {
             int x  = rest.substring(0, c2).toInt();
             int y  = rest.substring(c2 + 1).toInt();
             moveTo(x, y);
-            delay(10);
+            delay(30);
         }
         Mouse.press(MOUSE_LEFT);
         delay(50);
@@ -255,14 +246,6 @@ void processCommand(const String &cmd) {
         for (int i = 0; i < 100; i++) Mouse.move(-127, -127, 0);
         curX = 0;
         curY = 0;
-
-    // ── 전체 해제 ──
-    } else if (action == "RA") {
-        Keyboard.releaseAll();
-        Mouse.release(MOUSE_LEFT);
-        Mouse.release(MOUSE_RIGHT);
-        Mouse.release(MOUSE_MIDDLE);
-        inputsReleased = true;
 
     } else {
         Serial.println("ERR:UNKNOWN_CMD");

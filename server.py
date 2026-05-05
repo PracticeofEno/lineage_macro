@@ -29,6 +29,9 @@ POTION_COOLDOWN = 600 # 포션 쿨타임(초)
 # lock : ping-pong과 pickup 명령이 같은 소켓을 동시에 사용하지 않도록 보호
 _clients: list[dict] = []
 _clients_lock = threading.Lock()
+_recv_buffers: dict[socket.socket, bytes] = {}
+_request_id = 0
+_request_id_lock = threading.Lock()
 
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
@@ -44,16 +47,63 @@ def _send_json(conn: socket.socket, obj: dict) -> bool:
 
 
 def _recv_json(conn: socket.socket) -> dict | None:
-    buf = b''
+    buf = _recv_buffers.pop(conn, b'')
     try:
         while b'\n' not in buf:
             chunk = conn.recv(4096)
             if not chunk:
                 return None
             buf += chunk
-        return json.loads(buf.split(b'\n')[0].decode())
+        line, rest = buf.split(b'\n', 1)
+        if rest:
+            _recv_buffers[conn] = rest
+        return json.loads(line.decode())
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def _next_request_id() -> int:
+    global _request_id
+    with _request_id_lock:
+        _request_id += 1
+        return _request_id
+
+
+def _remember_pong(client: dict | None, resp: dict):
+    if client is None or resp.get("status") != "pong":
+        return
+    client["mp"] = resp.get("mp", 0)
+    client["available"] = int(client["mp"] // 20)
+
+
+def _recv_expected_response(
+    conn: socket.socket,
+    *,
+    req_id: int,
+    expected_status: str,
+    timeout: float,
+    client: dict | None = None,
+) -> dict | None:
+    deadline = time.time() + timeout
+    try:
+        while True:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return None
+            conn.settimeout(remaining)
+            resp = _recv_json(conn)
+            if resp is None:
+                return None
+
+            status = resp.get("status")
+            resp_req_id = resp.get("req_id")
+            if status == expected_status and (resp_req_id == req_id or resp_req_id is None):
+                return resp
+
+            _remember_pong(client, resp)
+            print(f"[server] 다른 요청 응답 무시: {resp}")
+    finally:
+        conn.settimeout(None)
 
 
 def _try_use_potion(client: dict) -> bool:
@@ -71,11 +121,16 @@ def _try_use_potion(client: dict) -> bool:
     conn = client["conn"]
     addr = client["addr"]
     with client["lock"]:
+        req_id = _next_request_id()
         print(f"[server] 포션 전송 → {addr}")
-        if _send_json(conn, {"cmd": "potion"}):
-            conn.settimeout(ACK_TIMEOUT)
-            ack = _recv_json(conn)
-            conn.settimeout(None)
+        if _send_json(conn, {"cmd": "potion", "req_id": req_id}):
+            ack = _recv_expected_response(
+                conn,
+                req_id=req_id,
+                expected_status="ok",
+                timeout=ACK_TIMEOUT,
+                client=client,
+            )
             if ack and ack.get("status") == "ok":
                 client["potion_last_used"] = now
                 print(f"[server] 포션 완료 ack 수신 from {addr}")
@@ -90,6 +145,7 @@ def _remove_client(client: dict):
         client["conn"].close()
     except OSError:
         pass
+    _recv_buffers.pop(client["conn"], None)
     print(f"[server] 클라이언트 제거됨: {client['addr']}")
 
 
@@ -118,11 +174,16 @@ def _handle_client(conn: socket.socket, addr: tuple):
     try:
         while True:
             with client["lock"]:
-                if not _send_json(conn, {"cmd": "ping"}):
+                req_id = _next_request_id()
+                if not _send_json(conn, {"cmd": "ping", "req_id": req_id}):
                     break
-                conn.settimeout(10)
-                resp = _recv_json(conn)
-                conn.settimeout(None)
+                resp = _recv_expected_response(
+                    conn,
+                    req_id=req_id,
+                    expected_status="pong",
+                    timeout=10,
+                    client=client,
+                )
                 if resp is None:
                     break
                 if resp.get("status") == "pong":
@@ -150,16 +211,21 @@ def _send_pickup(client: dict, nickname: str | None = None) -> bool:
     conn = client["conn"]
     addr = client["addr"]
     with client["lock"]:
-        payload = {"cmd": "pickup", "target": "lineage1"}
+        req_id = _next_request_id()
+        payload = {"cmd": "pickup", "target": "lineage1", "req_id": req_id}
         if nickname:
             payload["nickname"] = nickname
         if not _send_json(conn, payload):
             _remove_client(client)
             return False
 
-        conn.settimeout(ACK_TIMEOUT)
-        resp = _recv_json(conn)
-        conn.settimeout(None)
+        resp = _recv_expected_response(
+            conn,
+            req_id=req_id,
+            expected_status="ok",
+            timeout=ACK_TIMEOUT,
+            client=client,
+        )
 
         if resp is None:
             print(f"[server] ack 수신 실패 - 클라이언트 제거: {addr}")

@@ -215,7 +215,7 @@ def exchange_loop():
     clients_snapshot = []
     _last_target_text = ''
     _last_target_first_seen = 0.0
-
+    macro._DIRECTION_FUNCS[macro.high_count_direction]()
     while running:
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:

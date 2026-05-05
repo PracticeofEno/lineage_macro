@@ -1,12 +1,12 @@
 {
-    "server_mouse_x_y": [685, 390],
+    "server_mouse_x_y": [605, 350],
     "client_mouse_x_y": [565, 330],
     "client_numbering_mouse_x_y": [1359, 314],
 
     "direction_threshold": 6,
-    "adena_per_pickup": 200,
+    "adena_per_pickup": 150,
 
-    "current_direction": "southeast",
+    "current_direction": "northwest",
     "low_count_direction": "southeast",
     "high_count_direction": "northwest",
 

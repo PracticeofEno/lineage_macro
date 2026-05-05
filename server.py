@@ -200,7 +200,10 @@ def _broadcast_move_coord(from_dir: str, to_dir: str):
 
 # ── Exchange 루프 ──────────────────────────────────────────────────────────────
 def exchange_loop():
-    global running
+    global running, _client_coord_direction
+
+    # 첫 방향 맞춰줌
+    macro._DIRECTION_FUNCS[macro.high_count_direction]()
 
     WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(4)
     stage = WAIT_NICKNAME
@@ -215,7 +218,6 @@ def exchange_loop():
     clients_snapshot = []
     _last_target_text = ''
     _last_target_first_seen = 0.0
-    macro._DIRECTION_FUNCS[macro.high_count_direction]()
     while running:
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
@@ -253,6 +255,7 @@ def exchange_loop():
                 if macro.current_direction != macro.low_count_direction:
                     macro.force_set_foreground_window(macro.lineage1_hwnd)
                     macro._DIRECTION_FUNCS[macro.low_count_direction]()
+                    _broadcast_move_coord(from_dir, macro.high_count_direction)
                     time.sleep(1)
                 time.sleep(0.5)
                 continue

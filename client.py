@@ -75,7 +75,7 @@ def _handle_command(msg: dict) -> dict | None:
         dx, dy = msg.get("dx", 0), msg.get("dy", 0)
         macro.apply_coord_delta(dx, dy)
         print(f"[client] 좌표 이동 수신: dx={dx:+}, dy={dy:+}")
-        return {"status": "ok"}
+        return None
 
     if cmd == "reset_coord":
         macro.reset_coord()

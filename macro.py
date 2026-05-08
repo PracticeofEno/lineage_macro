@@ -23,6 +23,7 @@ import hangul
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 _CONVERTED_DATA_PATH = os.path.join(_BASE, "converted_data.json")
+_TARGET_CHECK_FAILURES_PATH = os.path.join(_BASE, "target_check_failures.json")
 with open(_CONVERTED_DATA_PATH, encoding="utf-8") as _f:
     _converted_map: dict[str, str] = json.load(_f)
 
@@ -193,9 +194,10 @@ _SHIFT_CHAR_MAP = {
     '!': '1', '@': '2', '#': '3', '$': '4', '%': '5',
     '^': '6', '&': '7', '*': '8', '(': '9', ')': '0',
     '_': '-', '+': '=', '{': '[', '}': ']', '|': '\\',
-    ':': ';', '"': "'", '<': ',', '>': '.', '?': '/',
+    ':': ';', '<': ',', '>': '.', '?': '/',
     '~': '`',
 }
+VK_OEM_7 = 0xDE  # US keyboard apostrophe/quote key (' / ")
 
 def _arduino_send_jamo(jamo: str):
     """자모 하나를 Arduino로 입력한다. 복합 자모는 분해해서 처리."""
@@ -253,6 +255,14 @@ def arduino_type_string(text: str):
         elif ch.isdigit():
             set_mode(False)
             _arduino_send(f'KP,{ord(ch)}')
+        elif ch == "'":
+            set_mode(False)
+            _arduino_send(f'KP,{VK_OEM_7}')
+        elif ch == '"':
+            set_mode(False)
+            _arduino_send(f'KD,{win32con.VK_SHIFT}')
+            _arduino_send(f'KP,{VK_OEM_7}')
+            _arduino_send(f'KU,{win32con.VK_SHIFT}')
         elif ch in _SHIFT_CHAR_MAP:
             set_mode(False)
             vk = ord(_SHIFT_CHAR_MAP[ch])
@@ -341,12 +351,76 @@ exchange_yes_button = (869, 914)  # 교환 수락 Yes 좌표
 exchange_no_button = (917, 912)   # 교환 수락 No 좌표
 _exchange_nickname_xy: tuple[int, int] | None = None
 _last_mp_retry_ctrl_a_time = 0.0
+TARGET_CHECK_FAILED_MESSAGE_DEFAULT = "{nickname}님 타겟 확인이 안 됩니다. 다시 거래 부탁드립니다."
 
 
 def _load_macro_data() -> dict:
     data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
     with open(data_path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _load_target_check_failures() -> dict:
+    try:
+        with open(_TARGET_CHECK_FAILURES_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"nicknames": {}}
+
+    if not isinstance(data, dict):
+        return {"nicknames": {}}
+
+    nicknames = data.get("nicknames")
+    if not isinstance(nicknames, dict):
+        data["nicknames"] = {}
+    return data
+
+
+def record_target_check_failure(nickname: str | None) -> int:
+    nickname = str(nickname).strip() if nickname else ""
+    if not nickname:
+        return 0
+
+    data = _load_target_check_failures()
+    nicknames = data.setdefault("nicknames", {})
+    record = nicknames.get(nickname)
+
+    if isinstance(record, dict):
+        try:
+            count_value = int(record.get("count", 0))
+        except (TypeError, ValueError):
+            count_value = 0
+    else:
+        try:
+            count_value = int(record or 0)
+        except (TypeError, ValueError):
+            count_value = 0
+
+    count_value += 1
+    nicknames[nickname] = {
+        "count": count_value,
+        "last_failed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    tmp_path = f"{_TARGET_CHECK_FAILURES_PATH}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+        f.write("\n")
+    os.replace(tmp_path, _TARGET_CHECK_FAILURES_PATH)
+
+    return count_value
+
+
+def get_target_check_failed_message(nickname: str | None, fail_count: int | None = None) -> str:
+    data = _load_macro_data()
+    message = str(data.get("target_check_failed_message", TARGET_CHECK_FAILED_MESSAGE_DEFAULT)).strip()
+    if not message:
+        message = TARGET_CHECK_FAILED_MESSAGE_DEFAULT
+
+    try:
+        return message.format(nickname=nickname or "", fail_count=fail_count or 0)
+    except (IndexError, KeyError, ValueError):
+        return message
 
 
 def _load_price_config(data: dict) -> None:
@@ -367,7 +441,7 @@ def get_adena_six_pickup_price() -> int:
 def get_adena_price_notice() -> str:
     return (
         f"1방 {adena_per_pickup}원 "
-        f"6방 {get_adena_six_pickup_price()}원"
+        f"6방 {get_adena_six_pickup_price()}원!"
     )
 
 
@@ -720,7 +794,7 @@ def use_potion():
     _arduino_send(f'KP,{win32con.VK_F8}')
 
 
-def press_ctrl_a_for_mp_retry(cooldown: float = 3.0) -> bool:
+def press_ctrl_a_for_mp_retry(cooldown: float = 3.0, print_log: bool = True) -> bool:
     global _last_mp_retry_ctrl_a_time
     now = time.time()
     if now - _last_mp_retry_ctrl_a_time < cooldown:
@@ -731,37 +805,57 @@ def press_ctrl_a_for_mp_retry(cooldown: float = 3.0) -> bool:
     arduino_key_press(ord('A'))
     arduino_key_up(win32con.VK_CONTROL)
     _last_mp_retry_ctrl_a_time = now
-    print("[macro] MP 인식 실패 -> Ctrl+A")
+    if print_log:
+        print("[macro] MP 인식 실패 -> Ctrl+A")
     time.sleep(0.1)
     return True
 
 
-def pickup_lineage1(target_nickname: str | None = None, direction: str | None = None):
+def pickup_lineage1(
+    target_nickname: str | None = None,
+    direction: str | None = None,
+    log_messages: list[str] | None = None,
+    print_logs: bool = True,
+    log_prefix: str = "[macro]",
+) -> bool:
+    def log(message: str) -> None:
+        line = f"{log_prefix} {message}" if log_prefix else message
+        if log_messages is not None:
+            log_messages.append(line)
+        if print_logs:
+            print(line)
+
     x, y = get_configured_mouse_xy(direction=direction)
     force_set_foreground_window(lineage1_hwnd)
     win32api.SetCursorPos((x, y))
     time.sleep(0.1)
 
-    for attempt in range(10):
-        arduino_mouse_shift_click_right(x, y)
-        time.sleep(0.1)
-        img = screenshot(hwnd=lineage1_hwnd)
-        input_text = readInputText(img)
-        print(f"[macro] 타겟 확인 ({attempt+1}/10): '{input_text}' == '{target_nickname}'?")
-        arduino_key_down(win32con.VK_CONTROL)
-        arduino_key_press(win32con.VK_BACK)
-        arduino_key_up(win32con.VK_CONTROL)
-        time.sleep(0.1)
-        if input_text == target_nickname:
-            print("[macro] 타겟 고정 성공")
-            break
-    else:
-        print("[macro] 타겟 고정 실패 - pickup 진행")
+    expected_nickname = str(target_nickname).strip() if target_nickname else ""
+    if expected_nickname:
+        for attempt in range(10):
+            arduino_mouse_shift_click_right(x, y)
+            time.sleep(0.1)
+            img = screenshot(hwnd=lineage1_hwnd)
+            input_text = readInputText(img).strip()
+            log(f"타겟 확인 ({attempt+1}/10) - read='{input_text}', expected='{expected_nickname}'")
+            arduino_key_down(win32con.VK_CONTROL)
+            arduino_key_press(win32con.VK_BACK)
+            arduino_key_up(win32con.VK_CONTROL)
+            time.sleep(0.1)
+            if input_text == expected_nickname:
+                log("타겟 고정 성공")
+                break
+        else:
+            failure_count = record_target_check_failure(expected_nickname)
+            log(f"타겟 고정 실패 - 현재 픽업 스킵, 누적 실패={failure_count}")
+            arduino_type_string(get_target_check_failed_message(expected_nickname, failure_count))
+            return False
 
     key_press(win32con.VK_F5)
     time.sleep(0.1)
     mouse_click_left(x, y)
     time.sleep(0.1)
+    return True
 
 
 

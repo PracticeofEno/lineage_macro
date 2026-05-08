@@ -36,6 +36,9 @@ HASTE_CHECK_DEFAULT_INTERVAL = 3.0
 # 기본 장사 방향이 아닌 방향에 있을 때 자리 확인을 다시 시도하는 간격(초)입니다.
 DIRECTION_RETURN_CHECK_INTERVAL = 30.0
 
+# 장사 가능 상태에서 실제 방향 클릭이 씹힌 경우를 보정하려고 같은 장사 방향을 다시 누르는 간격(초)입니다.
+SHOP_DIRECTION_FORCE_INTERVAL_SECONDS = 15.0
+
 # 교환창 슬롯 영역 평균 밝기가 이 값보다 크면 교환 OK 후보로 판단합니다.
 EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD = 120.0
 
@@ -47,6 +50,16 @@ SAME_NICKNAME_TURN_DEFAULT_SECONDS = 0.0
 
 # 상태 로그를 몇 초마다 출력할지 정하는 기본값입니다.
 STATUS_INTERVAL_DEFAULT_SECONDS = 3.0
+
+# MP 회복중일 때 안내 채팅을 다시 입력하는 기본 간격(초)입니다.
+LOW_MP_MESSAGE_DEFAULT_INTERVAL_SECONDS = 10.0
+
+# macro_data.json에 low_mp_messages가 없거나 비어 있을 때 쓰는 기본 안내 문구입니다.
+LOW_MP_MESSAGES_DEFAULT = (
+    "죄송합니다. 마나회복중입니다.",
+    "잠시만 기다려주세요. 마나회복중입니다.",
+    "마나 회복 후 바로 진행하겠습니다.",
+)
 
 # q/1/2 컨트롤러에서 server 실행 후 client를 띄우기 전 기다리는 기본 시간(초)입니다.
 DUAL_START_DELAY_DEFAULT_SECONDS = 2.0
@@ -153,6 +166,28 @@ def read_blocked_turn_directions(data: dict) -> set[str]:
     else:
         directions = []
     return {str(direction).strip() for direction in directions if str(direction).strip()}
+
+
+def read_low_mp_message_config(data: dict) -> tuple[float, list[str]]:
+    try:
+        interval = float(
+            data.get("low_mp_message_interval_seconds", LOW_MP_MESSAGE_DEFAULT_INTERVAL_SECONDS)
+        )
+    except (TypeError, ValueError):
+        interval = LOW_MP_MESSAGE_DEFAULT_INTERVAL_SECONDS
+
+    raw_messages = data.get("low_mp_messages", LOW_MP_MESSAGES_DEFAULT)
+    if isinstance(raw_messages, str):
+        messages = [raw_messages.strip()] if raw_messages.strip() else []
+    elif isinstance(raw_messages, (list, tuple)):
+        messages = [str(message).strip() for message in raw_messages if str(message).strip()]
+    else:
+        messages = []
+
+    if not messages:
+        messages = list(LOW_MP_MESSAGES_DEFAULT)
+
+    return max(0.0, interval), messages
 
 
 def read_same_nickname_turn_seconds(data: dict) -> float:
@@ -442,7 +477,9 @@ class IndependentHasteMacro:
         self.last_status_print_time = 0.0
         self.last_haste_check_time = 0.0
         self.last_return_check_time = 0.0
+        self.last_shop_direction_force_time = time.time()
         self.last_pickup_time = 0.0
+        self.low_mp_message_index = 0
         self.greeted_nickname: str | None = None
         self.adena_before: int | None = None
         self.prev_brightness: float | None = None
@@ -518,6 +555,18 @@ class IndependentHasteMacro:
         with input_lock():
             macro.force_set_foreground_window(macro.lineage1_hwnd)
             macro.arduino_type_string(text)
+
+    def type_next_low_mp_message(self, *, force: bool = False) -> bool:
+        interval, messages = read_low_mp_message_config(load_macro_data())
+        now = time.time()
+        if not force and now - self.last_type_string_time < interval:
+            return False
+
+        message = messages[self.low_mp_message_index % len(messages)]
+        self.low_mp_message_index += 1
+        self.type_string(message)
+        self.last_type_string_time = time.time()
+        return True
 
     def key_press(self, vk: int) -> None:
         with input_lock():
@@ -618,6 +667,7 @@ class IndependentHasteMacro:
         if direction is not None:
             self.shop_direction = direction
             self.last_return_check_time = time.time()
+            self.last_shop_direction_force_time = time.time()
             self.reset_same_nickname_tracking()
             print(f"[{self.role}] direction changed -> {self.shop_direction}")
         else:
@@ -649,16 +699,19 @@ class IndependentHasteMacro:
         if not should_face_low:
             return False
 
+        entering_low_mp = not self.was_low_mp
         self.was_low_mp = True
+        sent_low_mp_message = False
         blocked_directions = read_blocked_turn_directions(load_macro_data())
         if macro.low_count_direction in blocked_directions:
             print(f"[{self.role}] low MP direction blocked -> {macro.low_count_direction}")
         elif self.turn_to(macro.low_count_direction):
             print(f"[{self.role}] low MP -> {macro.low_count_direction}")
 
-        if time.time() - self.last_type_string_time >= 10:
-            self.type_string("죄송합니다. 마나회복중입니다.")
-            self.last_type_string_time = time.time()
+        if entering_low_mp:
+            sent_low_mp_message = self.type_next_low_mp_message(force=True)
+        if not sent_low_mp_message:
+            self.type_next_low_mp_message()
 
         time.sleep(0.5)
         return True
@@ -679,6 +732,7 @@ class IndependentHasteMacro:
 
         self.shop_direction = recover_direction
         self.was_low_mp = False
+        self.last_shop_direction_force_time = time.time()
         return True
 
     def try_haste_front_person(self, check_xy: tuple[int, int], direction_change_nicknames: set[str]) -> str | None:
@@ -735,6 +789,7 @@ class IndependentHasteMacro:
             self.turn_to(macro.current_direction, force=True)
             if self.turn_to(self.shop_direction):
                 print(f"[{self.role}] shop direction={self.shop_direction}")
+            self.last_shop_direction_force_time = time.time()
             self.direction_synced = True
 
         self.update_mp()
@@ -771,6 +826,14 @@ class IndependentHasteMacro:
             self.stage = "read_adena"
             return
 
+        if time.time() - self.last_shop_direction_force_time >= SHOP_DIRECTION_FORCE_INTERVAL_SECONDS:
+            if self.turn_to(self.shop_direction, force=True):
+                print(f"[{self.role}] force shop direction -> {self.shop_direction}")
+                self.img = macro.screenshot(hwnd=macro.lineage1_hwnd)
+            self.last_shop_direction_force_time = time.time()
+            time.sleep(0.2)
+            return
+
         if (
             self.shop_direction != self.base_shop_direction
             and time.time() - self.last_return_check_time >= DIRECTION_RETURN_CHECK_INTERVAL
@@ -791,6 +854,7 @@ class IndependentHasteMacro:
             if haste_result and haste_result != "haste":
                 self.shop_direction = haste_result
                 self.last_return_check_time = time.time()
+                self.last_shop_direction_force_time = time.time()
                 self.reset_same_nickname_tracking()
                 print(f"[{self.role}] direction changed -> {self.shop_direction}")
             if haste_result:
@@ -878,8 +942,20 @@ class IndependentHasteMacro:
             self.reset_trade_state()
             return
 
+        if received < macro.adena_per_pickup:
+            print(
+                f"[{self.role}] adena too low: "
+                f"received={received}, required={macro.adena_per_pickup}"
+            )
+            self.type_string(f"아데나가 부족합니다. 1방 {macro.adena_per_pickup}원입니다.")
+            self.last_type_string_time = time.time()
+            time.sleep(1.0)
+            self.reset_trade_state()
+            return
+
         pickup_count = macro.get_pickup_count_for_adena(received)
         remaining = min(macro.direction_threshold, self.current_available, pickup_count)
+        successful_pickups = 0
         print(f"[{self.role}] pickup remaining={remaining}, available={self.current_available}")
 
         while remaining > 0:
@@ -888,15 +964,21 @@ class IndependentHasteMacro:
                 time.sleep(SAME_PICKUP_DELAY_SECONDS - elapsed)
 
             with input_lock():
-                macro.pickup_lineage1(
+                pickup_ok = macro.pickup_lineage1(
                     target_nickname=self.greeted_nickname,
                     direction=self.shop_direction,
                 )
+            if not pickup_ok:
+                print(f"[{self.role}] target check failed -> skip current pickup")
+                self.last_type_string_time = time.time()
+            else:
+                self.current_available -= 1
+                successful_pickups += 1
+
             self.last_pickup_time = time.time()
-            self.current_available -= 1
             remaining -= 1
 
-        if received > 0:
+        if successful_pickups > 0:
             self.type_string("감사합니다!")
             self.last_type_string_time = time.time()
             time.sleep(2.5)

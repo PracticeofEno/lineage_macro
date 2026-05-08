@@ -1,23 +1,83 @@
 {
-    "server_mouse_x_y": [690, 410],
-    "server_mouse_x_y_by_direction": {
-        "north": [650, 350],
-        "northeast": [690, 370],
-        "east": [730, 390],
-        "southeast": [690, 410],
-        "south": [650, 430],
-        "southwest": [610, 410],
-        "west": [570, 390],
-        "northwest": [610, 370]
+    "_comments": {
+        "_server_py_defaults_note": "server.py에서 DEFAULT가 붙은 전역값은 이 JSON 설정이 없거나 잘못됐을 때만 쓰는 기본값입니다. 정상 상황에서는 이 JSON 값이 우선입니다.",
+        "_server_py_only_values_note": "SAME_UNIT_DELAY, POTION_COOLDOWN, HASTE_AFTER_F7_WAIT_SECONDS, EXCHANGE_MONITOR_INTERVAL_SECONDS, SHOP_DIRECTION_FORCE_INTERVAL_SECONDS, DIRECTION_RETURN_CHECK_INTERVAL, EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD는 현재 server.py 전용값입니다.",
+        "server_mouse_x_y": "server 창에서 앞사람 닉네임 확인과 server 직접 픽업에 쓰는 기본 마우스 좌표입니다. 방향별 좌표가 없을 때만 fallback으로 사용됩니다.",
+        "server_mouse_x_y_by_direction": "server 창에서 현재 장사 방향별로 앞사람 닉네임을 확인하고 픽업할 좌표입니다. server.py 실행 시 방향별 좌표는 이 값이 우선입니다.",
+        "client_mouse_x_y": "client 창에서 픽업할 때 쓰는 기본 좌표입니다. server.py 방식에서는 방향별 좌표를 무시하고 이 기본 좌표를 기준으로 client pickup을 보냅니다.",
+        "client_mouse_x_y_by_direction": "client 창에서 방향별로 쓸 수 있는 픽업 좌표입니다. independent_haste처럼 방향별 좌표를 쓰는 실행 방식에서 의미가 있습니다.",
+        "client_numbering_mouse_x_y": "client2, client3처럼 번호가 붙은 추가 client 창에서 쓰는 기본 픽업 좌표입니다.",
+        "client_numbering_mouse_x_y_by_direction": "번호가 붙은 추가 client 창에서 방향별로 쓸 수 있는 픽업 좌표입니다.",
+        "haste_check_interval_seconds": "server가 앞사람 닉네임을 확인하고 F7 헤이스트를 시도하는 주기(초)입니다. 없거나 잘못되면 server.py의 HASTE_CHECK_DEFAULT_INTERVAL을 씁니다.",
+        "same_front_nickname_chat_seconds": "같은 좌표에 같은 닉네임이 이 시간 이상 있거나, 같은 거래창 닉네임이 이 시간 이상 열려 있으면 client 채팅 명령을 보냅니다.",
+        "same_front_nickname_chat_client_idx": "같은 닉네임 감지 시 채팅 명령을 보낼 client 번호입니다. 보통 client.py 실행 인자 idx와 맞춥니다.",
+        "same_front_nickname_chat_cooldown_seconds": "같은 닉네임에 대해 채팅 명령을 다시 보내기 전 기다리는 시간(초)입니다. 도배 방지용입니다.",
+        "same_front_nickname_client_message": "client가 입력할 채팅 문구입니다. {nickname}을 넣으면 감지된 닉네임으로 바뀝니다. 큰따옴표는 \\\"처럼 적습니다.",
+        "low_mp_message_interval_seconds": "MP 회복중 상태에서 안내 채팅을 다시 치기 전 기다리는 시간(초)입니다. 없거나 잘못되면 server.py의 LOW_MP_MESSAGE_DEFAULT_INTERVAL_SECONDS를 씁니다.",
+        "low_mp_messages": "MP 회복중일 때 순서대로 돌아가며 입력할 채팅 문구 목록입니다. 마지막 문구 후에는 다시 첫 문구부터 반복합니다.",
+        "target_check_failed_message": "픽업 전 타겟 닉네임 확인을 10번 실패했을 때 해당 픽업을 스킵하고 입력할 채팅 문구입니다. {nickname}은 거래창 닉네임, {fail_count}는 누적 실패 횟수입니다.",
+        "direction_change_nicknames": "이 목록에 있는 닉네임이 앞좌표 또는 거래창에서 감지되면 거래를 피하거나 방향전환 대상으로 봅니다.",
+        "blocked_turn_directions": "자동 방향전환 후보에서 제외할 방향 목록입니다. 여기에 넣은 방향으로는 랜덤 방향전환하지 않습니다.",
+        "direction_threshold": "전체 남은 헤이스트 가능 횟수가 이 값보다 낮으면 MP 부족으로 보고 low_count_direction을 봅니다. server.py의 LOW_MP_AVAILABLE_THRESHOLD와 다릅니다.",
+        "adena_per_pickup": "일반 1방 가격입니다. 3방/6방 특가와 정확히 일치하지 않는 금액은 이 값으로 나눠 pickup 횟수를 계산합니다.",
+        "adena_three_pickup_price": "받은 아데나가 이 금액과 정확히 같으면 3방으로 계산합니다.",
+        "adena_six_pickup_price": "받은 아데나가 이 금액과 정확히 같으면 6방으로 계산합니다.",
+        "current_direction": "프로그램 시작 시 캐릭터가 보고 있다고 가정하는 현재 방향입니다. 시작 직후 방향 동기화 기준입니다.",
+        "low_count_direction": "MP가 부족할 때 바라볼 방향입니다.",
+        "high_count_direction": "MP가 회복됐을 때 우선적으로 돌아가려는 장사 방향입니다.",
+        "turn_north_xy": "north 방향으로 돌 때 shift+좌클릭할 좌표입니다.",
+        "turn_northeast_xy": "northeast 방향으로 돌 때 shift+좌클릭할 좌표입니다.",
+        "turn_east_xy": "east 방향으로 돌 때 shift+좌클릭할 좌표입니다.",
+        "turn_southeast_xy": "southeast 방향으로 돌 때 shift+좌클릭할 좌표입니다.",
+        "turn_south_xy": "south 방향으로 돌 때 shift+좌클릭할 좌표입니다.",
+        "turn_southwest_xy": "southwest 방향으로 돌 때 shift+좌클릭할 좌표입니다.",
+        "turn_west_xy": "west 방향으로 돌 때 shift+좌클릭할 좌표입니다.",
+        "turn_northwest_xy": "northwest 방향으로 돌 때 shift+좌클릭할 좌표입니다.",
+        "_comment_directions": "설정에서 사용할 수 있는 방향 이름 목록입니다. north, northeast, east, southeast, south, southwest, west, northwest 중 하나를 씁니다."
     },
-    "client_mouse_x_y": [730, 430],
+    "server_mouse_x_y": [690, 415],
+    "server_mouse_x_y_by_direction": {
+        "north": [
+            650,
+            350
+        ],
+        "northeast": [
+            690,
+            350
+        ],
+        "east": [
+            730,
+            390
+        ],
+        "southeast": [
+            690,
+            400
+        ],
+        "south": [
+            650,
+            430
+        ],
+        "southwest": [
+            610,
+            415
+        ],
+        "west": [
+            570,
+            390
+        ],
+        "northwest": [
+            610,
+            355
+        ]
+    },
+    "client_mouse_x_y": [730, 435],
     "client_mouse_x_y_by_direction": {
         "north": [650, 350],
-        "northeast": [690, 370],
+        "northeast": [730, 370],
         "east": [730, 390],
         "southeast": [730, 430],
         "south": [650, 430],
-        "southwest": [610, 410],
+        "southwest": [650, 430],
         "west": [570, 390],
         "northwest": [610, 370]
     },
@@ -36,11 +96,16 @@
         "northwest": [1359, 314]
     },
     "haste_check_interval_seconds": 3.0,
-    "same_front_nickname_chat_seconds": 60.0,
+    "same_front_nickname_chat_seconds": 30.0,
     "same_front_nickname_chat_client_idx": 1,
-    "same_front_nickname_chat_cooldown_seconds": 60.0,
-    "same_front_nickname_client_message": "\"헤이로집산다\" {nickname} 꼬장 알림",
-    "direction_change_nicknames": [],
+    "same_front_nickname_chat_cooldown_seconds": 15.0,
+    "same_front_nickname_client_message": "\"{nickname} 꼬장 알림",
+    "low_mp_message_interval_seconds": 20.0,
+    "low_mp_messages": [
+        "죄송합니다. MP회복중입니다."
+    ],
+    "target_check_failed_message": "{nickname}님 정면에 위치해주시기 바랍니다.",
+    "direction_change_nicknames": ["타쓰지", "김남진"],
     "blocked_turn_directions": ["north", "east", "south", "west"],
     "direction_threshold": 6,
     "adena_per_pickup": 150,
@@ -50,36 +115,28 @@
     "low_count_direction": "northwest",
     "high_count_direction": "southeast",
     "turn_north_xy": [
-        654,
-        292
+        650, 350
     ],
     "turn_northeast_xy": [
-        816,
-        302
+        690, 400
     ],
     "turn_east_xy": [
-        770,
-        394
+        730, 390
     ],
     "turn_southeast_xy": [
-        810,
-        544
+        690, 435
     ],
     "turn_south_xy": [
-        654,
-        584
+        650, 430
     ],
     "turn_southwest_xy": [
-        376,
-        528
+        610, 430
     ],
     "turn_west_xy": [
-        336,
-        399
+        570, 390
     ],
     "turn_northwest_xy": [
-        429,
-        234
+        600, 385
     ],
     "_comment_directions": "north, northeast, east, southeast, south, southwest, west, northwest"
 }

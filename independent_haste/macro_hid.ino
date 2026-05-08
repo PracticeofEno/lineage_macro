@@ -97,6 +97,7 @@ int vkToHid(int vk) {
         case 0x7B: return KEY_F12;
 
         case 0x14: return KEY_CAPS_LOCK;
+        case 0xDE: return '\'';           // VK_OEM_7 (' / ")
         case 0x15: return KEY_RIGHT_ALT;  // VK_HANGUL → 한/영 토글 (Right Alt)
     }
 

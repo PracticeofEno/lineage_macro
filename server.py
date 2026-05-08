@@ -17,20 +17,60 @@ import win32gui
 
 import macro
 
+# 서버가 client.py 연결을 받을 IP입니다. 0.0.0.0은 현재 PC의 모든 네트워크에서 받겠다는 뜻입니다.
 HOST = '0.0.0.0'
+
+# client.py가 접속할 TCP 포트입니다. client 쪽 포트와 반드시 같아야 합니다.
 PORT = 9999
-ACK_TIMEOUT = 10      # 픽업 ack 대기 최대 시간(초)
-SAME_UNIT_DELAY = 0.5   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
-POTION_COOLDOWN = 600 # 포션 쿨타임(초)
+
+# server가 client에게 pickup 명령을 보낸 뒤 응답을 기다리는 최대 시간(초)입니다.
+ACK_TIMEOUT = 10
+
+# 같은 idx, 즉 같은 PC 안에서 서버/클라이언트 픽업 명령이 너무 붙지 않게 벌리는 시간(초)입니다.
+SAME_UNIT_DELAY = 0.5
+
+# MP 포션 사용 후 다시 사용할 수 있을 때까지 기다리는 시간(초)입니다.
+POTION_COOLDOWN = 600
+
+# 개별 창의 헤이스트 가능 횟수가 이 값 이하이면 MP 포션 사용 후보로 봅니다.
+# macro_data.json의 direction_threshold와 다릅니다. 이 값은 "포션 사용 기준"입니다.
 LOW_MP_AVAILABLE_THRESHOLD = 2
+
+# macro_data.json의 haste_check_interval_seconds가 없거나 잘못됐을 때만 쓰는 기본값입니다.
 HASTE_CHECK_DEFAULT_INTERVAL = 3.0
+
+# 앞사람에게 F7을 누른 뒤 거래창/상태가 뜰 시간을 주기 위해 기다리는 시간(초)입니다.
 HASTE_AFTER_F7_WAIT_SECONDS = 0.2
+
+# 거래창이 열린 뒤 밝기 변화를 확인하는 반복 주기(초)입니다.
 EXCHANGE_MONITOR_INTERVAL_SECONDS = 0.25
+
+# macro_data.json의 same_front_nickname_chat_seconds가 없거나 잘못됐을 때만 쓰는 기본값입니다.
 SAME_FRONT_NICKNAME_CHAT_DEFAULT_SECONDS = 60.0
+
+# macro_data.json의 same_front_nickname_chat_cooldown_seconds가 없거나 잘못됐을 때만 쓰는 기본값입니다.
 SAME_FRONT_NICKNAME_CHAT_DEFAULT_COOLDOWN_SECONDS = 60.0
-SHOP_DIRECTION_FORCE_INTERVAL_SECONDS = 30.0
+
+# macro_data.json의 low_mp_message_interval_seconds가 없거나 잘못됐을 때만 쓰는 기본값입니다.
+LOW_MP_MESSAGE_DEFAULT_INTERVAL_SECONDS = 20.0
+
+# macro_data.json의 low_mp_messages가 없거나 비어 있을 때만 쓰는 기본 안내 문구 목록입니다.
+LOW_MP_MESSAGES_DEFAULT = (
+    "죄송합니다. MP회복중입니다.",
+    "잠시만 기다려주세요. MP회복중입니다.",
+    "MP 회복 후 바로 진행하겠습니다.",
+)
+
+# 장사 가능 상태에서 방향 클릭이 씹힌 경우를 보정하려고 같은 장사 방향을 다시 누르는 간격(초)입니다.
+SHOP_DIRECTION_FORCE_INTERVAL_SECONDS = 15.0
+
+# 기본 장사 방향이 아닌 방향에 있을 때 원래 자리 확인을 다시 시도하는 간격(초)입니다.
 DIRECTION_RETURN_CHECK_INTERVAL = 30.0
+
+# 거래창 슬롯 영역 평균 밝기가 이 값보다 크면 교환 OK 후보로 판단합니다.
 EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD = 120.0
+
+# 자동 방향전환 후보로 쓰는 8방향 이름입니다. macro_data.json의 방향별 좌표 키와 맞아야 합니다.
 TURN_DIRECTIONS = (
     "north",
     "northeast",
@@ -118,14 +158,17 @@ def _try_use_potion(client: dict) -> bool:
     conn = client["conn"]
     addr = client["addr"]
     with client["lock"]:
-        print(f"[server] 포션 전송 → {addr}")
+        print(f"[server] 포션 명령 전송 - client_idx={client.get('idx')}, addr={addr}")
         if _send_json(conn, {"cmd": "potion"}):
             conn.settimeout(ACK_TIMEOUT)
             ack = _recv_json(conn)
             conn.settimeout(None)
+            if ack:
+                for line in ack.get("logs", []):
+                    print(f"[client idx({client.get('idx')})] {line}")
             if ack and ack.get("status") == "ok":
                 client["potion_last_used"] = now
-                print(f"[server] 포션 완료 ack 수신 from {addr}")
+                print(f"[server] 포션 응답 수신 - client_idx={client.get('idx')}, status=ok, addr={addr}")
                 return True
     return False
 
@@ -168,6 +211,8 @@ def _handle_client(conn: socket.socket, addr: tuple):
                 conn.settimeout(None)
                 if resp is None:
                     break
+                for line in resp.get("logs", []):
+                    print(f"[client idx({client.get('idx')})] {line}")
                 if resp.get("status") == "pong":
                     mp = resp.get("mp")
                     if mp is not None:
@@ -190,7 +235,7 @@ def _accept_loop(server_sock: socket.socket):
 
 
 # ── 픽업 명령 전송 ─────────────────────────────────────────────────────────────
-def _send_pickup(client: dict, nickname: str | None = None, direction: str | None = None) -> bool:
+def _send_pickup(client: dict, nickname: str | None = None, direction: str | None = None) -> str:
     """특정 클라이언트에게 pickup 명령을 보내고 ack를 기다린다."""
     conn = client["conn"]
     addr = client["addr"]
@@ -202,23 +247,30 @@ def _send_pickup(client: dict, nickname: str | None = None, direction: str | Non
             payload["direction"] = direction
         if not _send_json(conn, payload):
             _remove_client(client)
-            return False
+            return "failed"
 
         conn.settimeout(ACK_TIMEOUT)
         resp = _recv_json(conn)
         conn.settimeout(None)
 
         if resp is None:
-            print(f"[server] ack 수신 실패 - 클라이언트 제거: {addr}")
+            print(f"[server] 픽업 응답 실패 - client_idx={client.get('idx')}, addr={addr}")
             _remove_client(client)
-            return False
+            return "failed"
+
+        for line in resp.get("logs", []):
+            print(f"[client idx({client.get('idx')})] {line}")
 
         if resp.get("status") == "ok":
-            print(f"[server] 픽업 완료 ack 수신 from {addr}")
-            return True
+            print(f"[server] 픽업 응답 수신 - client_idx={client.get('idx')}, status=ok, addr={addr}")
+            return "ok"
 
-        print(f"[server] 예상치 못한 응답: {resp}")
-        return False
+        if resp.get("status") == "target_failed":
+            print(f"[server] 픽업 응답 수신 - client_idx={client.get('idx')}, status=target_failed, addr={addr}")
+            return "target_failed"
+
+        print(f"[server] 픽업 응답 오류 - client_idx={client.get('idx')}, resp={resp}")
+        return "failed"
 
 
 def _select_chat_client(clients_snapshot: list[dict], preferred_idx: int | None) -> dict | None:
@@ -251,15 +303,18 @@ def _send_client_chat(client: dict, message: str) -> bool:
         conn.settimeout(None)
 
         if resp is None:
-            print(f"[server] chat ack 수신 실패 - 클라이언트 제거: {addr}")
+            print(f"[server] 채팅 응답 실패 - client_idx={client.get('idx')}, addr={addr}")
             _remove_client(client)
             return False
 
+        for line in resp.get("logs", []):
+            print(f"[client idx({client.get('idx')})] {line}")
+
         if resp.get("status") == "ok":
-            print(f"[server] client chat 완료 ack 수신 from {addr}")
+            print(f"[server] 채팅 응답 수신 - client_idx={client.get('idx')}, status=ok, addr={addr}")
             return True
 
-        print(f"[server] 예상치 못한 chat 응답: {resp}")
+        print(f"[server] 채팅 응답 오류 - client_idx={client.get('idx')}, resp={resp}")
         return False
 
 
@@ -305,6 +360,30 @@ def _load_same_front_nickname_chat_config() -> tuple[float, str, int | None, flo
     return max(0.0, seconds), message, client_idx, max(0.0, cooldown)
 
 
+def _load_low_mp_message_config() -> tuple[float, list[str]]:
+    data = _load_macro_data()
+
+    try:
+        interval = float(
+            data.get("low_mp_message_interval_seconds", LOW_MP_MESSAGE_DEFAULT_INTERVAL_SECONDS)
+        )
+    except (TypeError, ValueError):
+        interval = LOW_MP_MESSAGE_DEFAULT_INTERVAL_SECONDS
+
+    raw_messages = data.get("low_mp_messages", LOW_MP_MESSAGES_DEFAULT)
+    if isinstance(raw_messages, str):
+        messages = [raw_messages.strip()] if raw_messages.strip() else []
+    elif isinstance(raw_messages, (list, tuple)):
+        messages = [str(message).strip() for message in raw_messages if str(message).strip()]
+    else:
+        messages = []
+
+    if not messages:
+        messages = list(LOW_MP_MESSAGES_DEFAULT)
+
+    return max(0.0, interval), messages
+
+
 def _read_adena_after_exchange(adena_before: int | None, timeout: float = 6.0) -> int | None:
     deadline = time.time() + timeout
     last_value = None
@@ -345,18 +424,18 @@ def _read_nickname_at_xy(check_xy: tuple[int, int]) -> str:
 def _try_haste_front_person(check_xy: tuple[int, int], direction_change_nicknames: set[str]) -> tuple[str | None, str]:
     nickname = _read_nickname_at_xy(check_xy)
     if not nickname:
-        print(f"[haste] 앞사람 감지 없음 at {check_xy}")
+        print(f"[server] 헤이스트 확인 - nickname=없음, xy={check_xy}")
         return None, ""
 
     if nickname in direction_change_nicknames:
         direction = macro.turn_random_excluding(macro.low_count_direction)
         if direction is None:
-            print(f"[haste] 지정 닉네임 감지: '{nickname}' at {check_xy} -> 거래신청 안 함, 랜덤 방향 전환 실패")
+            print(f"[server] 헤이스트 차단 - nickname='{nickname}', xy={check_xy}, turn=failed")
             return None, nickname
-        print(f"[haste] 지정 닉네임 감지: '{nickname}' at {check_xy} -> 거래신청 안 함, {direction} 전환")
+        print(f"[server] 헤이스트 차단 - nickname='{nickname}', xy={check_xy}, turn={direction}")
         return direction, nickname
 
-    print(f"[haste] 앞사람 감지: '{nickname}' at {check_xy} -> F7")
+    print(f"[server] 헤이스트 시도 - nickname='{nickname}', xy={check_xy}, key=F7")
     macro._arduino_send(f'KP,{win32con.VK_F7}')
     return "haste", nickname
 
@@ -442,6 +521,7 @@ def exchange_loop():
     exchange_window_since = 0.0
     exchange_window_last_chat_key = None
     exchange_window_last_chat_time = 0.0
+    low_mp_message_index = 0
 
     def reset_exchange_window_tracking() -> None:
         nonlocal exchange_window_nickname, exchange_window_since
@@ -456,6 +536,30 @@ def exchange_loop():
         prev_brightness = None
         brightness_changed = False
         reset_exchange_window_tracking()
+
+    def turn_after_same_nickname_timeout(source: str, nickname: str, elapsed: float) -> bool:
+        nonlocal shop_direction, _last_return_check_time, _last_shop_direction_force_time
+        nonlocal same_front_nickname, same_front_xy, same_front_since
+
+        direction = macro.turn_random_excluding(macro.low_count_direction)
+        if direction is None:
+            print(
+                f"[server] 장사 방향 변경 실패 - source={source}, "
+                f"nickname='{nickname}', elapsed={elapsed:.1f}s"
+            )
+            return False
+
+        shop_direction = direction
+        _last_return_check_time = time.time()
+        _last_shop_direction_force_time = time.time()
+        same_front_nickname = None
+        same_front_xy = None
+        same_front_since = 0.0
+        print(
+            f"[server] 장사 방향 변경 - source={source}, "
+            f"nickname='{nickname}', elapsed={elapsed:.1f}s, direction={direction}"
+        )
+        return True
 
     def handle_exchange_window_timeout(nickname: str) -> bool:
         nonlocal exchange_window_nickname, exchange_window_since
@@ -491,20 +595,35 @@ def exchange_loop():
         except (IndexError, KeyError, ValueError):
             rendered_message = chat_message
 
-        print(f"[server] 거래창 '{nickname}' {elapsed:.1f}초 유지 -> ESC 후 client chat")
+        print(f"[server] 거래창 유지 감지 - nickname='{nickname}', elapsed={elapsed:.1f}s, action=esc_and_client_chat")
         macro.key_press(win32con.VK_ESCAPE)
         time.sleep(0.2)
 
         chat_client = _select_chat_client(clients_snapshot, chat_client_idx)
         if chat_client is None:
-            print("[server] exchange window chat skipped: no connected client")
+            print("[server] 채팅 명령 스킵 - reason=no_connected_client, source=exchange_window")
         elif _send_client_chat(chat_client, rendered_message):
             exchange_window_last_chat_key = chat_key
             exchange_window_last_chat_time = now
-            print(f"[server] exchange window chat sent -> client idx({chat_client.get('idx')})")
+            print(f"[server] 채팅 명령 완료 - client_idx={chat_client.get('idx')}, source=exchange_window")
 
+        turn_after_same_nickname_timeout("exchange_window", nickname, elapsed)
         reset_trade_state()
         time.sleep(0.5)
+        return True
+
+    def type_next_low_mp_message(force: bool = False) -> bool:
+        nonlocal _last_type_string_time, low_mp_message_index
+
+        interval, messages = _load_low_mp_message_config()
+        now = time.time()
+        if not force and now - _last_type_string_time < interval:
+            return False
+
+        message = messages[low_mp_message_index % len(messages)]
+        low_mp_message_index += 1
+        macro.arduino_type_string(message)
+        _last_type_string_time = time.time()
         return True
 
     while running:
@@ -553,19 +672,21 @@ def exchange_loop():
             should_face_low = total_count < macro.direction_threshold
             if time.time() - _last_status_print_time >= 3:
                 for e in clients_snapshot:
-                    print(f"idx({e['idx']}): MP: {e['mp']}, 잔여: {e['available']}")
+                    print(f"[server] MP 상태 - idx={e['idx']}, mp={e['mp']}, available={e['available']}")
                 status_xy = macro.get_configured_mouse_xy("server_mouse_x_y", direction=shop_direction)
-                print(f"[server] 현재 방향: {shop_direction}, 좌표: {status_xy}")
+                print(f"[server] 장사 상태 - direction={shop_direction}, xy={status_xy}")
                 _last_status_print_time = time.time()
 
             if should_face_low:
+                entering_low_mp = not was_low_mp
                 was_low_mp = True
+                sent_low_mp_message = False
                 if macro.turn_to(macro.low_count_direction):
                     print(f"[server] 저MP 감지 -> {macro.low_count_direction}")
-                    macro.arduino_type_string("죄송합니다. 마나회복중입니다.")
-                if time.time() - _last_type_string_time >= 20:
-                    macro.arduino_type_string("죄송합니다. 마나회복중입니다.")
-                    _last_type_string_time = time.time()
+                if entering_low_mp:
+                    sent_low_mp_message = type_next_low_mp_message(force=True)
+                if not sent_low_mp_message:
+                    type_next_low_mp_message()
                 time.sleep(0.5)
                 continue
             else:
@@ -586,6 +707,8 @@ def exchange_loop():
             if time.time() - _last_type_string_time >= 10:
                 _ad_formats = [
                     macro.get_adena_price_notice(),
+                    # "김남진 타쓰지 사기 조심!",
+                    # "왜 나한테만 엄격한건데!",
                 ]
                 macro.arduino_type_string(random.choice(_ad_formats))
                 _last_type_string_time = time.time()
@@ -619,15 +742,32 @@ def exchange_loop():
                 and time.time() - _last_return_check_time >= DIRECTION_RETURN_CHECK_INTERVAL
             ):
                 _last_return_check_time = time.time()
-                base_check_xy = macro.get_configured_mouse_xy("server_mouse_x_y", direction=shop_direction)
+                base_check_xy = macro.get_configured_mouse_xy("server_mouse_x_y", direction=base_shop_direction)
                 base_nickname = _read_nickname_at_xy(base_check_xy)
 
                 if base_nickname in direction_change_nicknames:
-                    print(f"[server] 원래 자리 확인: '{base_nickname}' 감지 at {base_check_xy} -> {shop_direction} 유지")
+                    print(
+                        f"[server] 기본 방향 복귀 보류 - nickname='{base_nickname}', "
+                        f"xy={base_check_xy}, current_direction={shop_direction}"
+                    )
                     time.sleep(0.5)
                     continue
 
-                print(f"[server] 원래 자리 확인: 지정 닉네임 없음('{base_nickname}') at {base_check_xy} -> {shop_direction} 유지")
+                if macro.turn_to(base_shop_direction, force=True):
+                    shop_direction = base_shop_direction
+                    _last_shop_direction_force_time = time.time()
+                    same_front_nickname = None
+                    same_front_xy = None
+                    same_front_since = 0.0
+                    print(
+                        f"[server] 기본 방향 복귀 - nickname='{base_nickname}', "
+                        f"xy={base_check_xy}, direction={shop_direction}"
+                    )
+                else:
+                    print(
+                        f"[server] 기본 방향 복귀 실패 - nickname='{base_nickname}', "
+                        f"xy={base_check_xy}, direction={base_shop_direction}"
+                    )
                 time.sleep(0.5)
                 continue
 
@@ -671,14 +811,20 @@ def exchange_loop():
 
                         chat_client = _select_chat_client(clients_snapshot, chat_client_idx)
                         if chat_client is None:
-                            print(f"[server] same front nickname chat skipped: no connected client")
+                            print("[server] 채팅 명령 스킵 - reason=no_connected_client, source=same_front_nickname")
                         elif _send_client_chat(chat_client, rendered_message):
                             same_front_last_chat_key = chat_key
                             same_front_last_chat_time = now
                             print(
-                                f"[server] same front nickname '{front_nickname}' "
-                                f"for {same_front_elapsed:.1f}s -> client idx({chat_client.get('idx')}) chat"
+                                f"[server] 채팅 명령 완료 - client_idx={chat_client.get('idx')}, "
+                                f"source=same_front_nickname, nickname='{front_nickname}', "
+                                f"elapsed={same_front_elapsed:.1f}s"
                             )
+                        turn_after_same_nickname_timeout(
+                            "same_front_nickname",
+                            front_nickname,
+                            same_front_elapsed,
+                        )
                 elif haste_result != "haste":
                     same_front_nickname = None
                     same_front_xy = None
@@ -746,10 +892,24 @@ def exchange_loop():
 
             print(f"[server] 아데나 변화 감지: {adena_before} → {adena_after} (slot_changed={brightness_changed})")
             received = adena_after - adena_before
+            
             if received <= 0:
                 print(f"[server] 아데나 증가 없음: received={received}")
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
                 macro.arduino_type_string("아데나를 받지 못 했습니다.")
+                _last_type_string_time = time.time()
+                time.sleep(1.0)
+                stage = WAIT_NICKNAME
+                greeted_nickname = None
+                adena_before = None
+                prev_brightness = None
+                brightness_changed = False
+                continue
+
+            if received < macro.adena_per_pickup:
+                print(f"[server] 아데나 부족: received={received}, required={macro.adena_per_pickup}")
+                macro.force_set_foreground_window(macro.lineage1_hwnd)
+                macro.arduino_type_string(f"아데나가 부족합니다. 1방 {macro.adena_per_pickup}원입니다.")
                 _last_type_string_time = time.time()
                 time.sleep(1.0)
                 stage = WAIT_NICKNAME
@@ -767,7 +927,11 @@ def exchange_loop():
             pickup_avail: dict[int, int] = {id(c): c["available"] for c in clients_snapshot}
             total_available = sum(pickup_avail.values())
             remaining = min(macro.direction_threshold, pickup_count)
-            print(f"remaining pickup count: {remaining} (received: {received}, available: {total_available})")
+            successful_pickups = 0
+            print(
+                f"[server] 픽업 시작 - remaining={remaining}, "
+                f"received={received}, available={total_available}"
+            )
 
             # ── 픽업 분배 ───────────────────────────────────────────────────
             # 매 라운드: 전체 중 available 최댓값 탐색
@@ -795,29 +959,44 @@ def exchange_loop():
                     if elapsed < SAME_UNIT_DELAY:
                         time.sleep(SAME_UNIT_DELAY - elapsed)
 
+                    pickup_skipped = False
                     if "conn" not in c:
-                        print(f"[서버 픽업 실행] - (남은 픽업: {remaining})")
-                        macro.pickup_lineage1(target_nickname=greeted_nickname, direction=shop_direction)
-                        ok = True
+                        print(f"[server] 픽업 실행 - target=server, remaining={remaining}")
+                        ok = macro.pickup_lineage1(
+                            target_nickname=greeted_nickname,
+                            direction=shop_direction,
+                            log_prefix="[server]",
+                        )
+                        if not ok:
+                            print("[server] 픽업 스킵 - reason=target_failed, target=server")
+                            pickup_skipped = True
+                            _last_type_string_time = time.time()
                     else:
-                        print(f"[서버 → 클라이언트 픽업] idx: {c['idx']} - (남은 픽업: {remaining})")
-                        ok = _send_pickup(c, nickname=greeted_nickname, direction=shop_direction)
+                        print(f"[server] 픽업 명령 전송 - target=client, idx={c['idx']}, remaining={remaining}")
+                        pickup_status = _send_pickup(c, nickname=greeted_nickname, direction=shop_direction)
+                        if pickup_status == "target_failed":
+                            print(f"[server] 픽업 스킵 - reason=target_failed, target=client, idx={c['idx']}")
+                            pickup_skipped = True
+                            _last_type_string_time = time.time()
+                        ok = pickup_status == "ok"
 
                     last_idx_time[c["idx"]] = time.time()
-                    if ok:
+                    if ok or pickup_skipped:
                         remaining -= 1
                         pickup_avail[id(c)] -= 1
                         sent_any = True
+                        if ok:
+                            successful_pickups += 1
 
                 if not sent_any:
                     if remaining > 0:
-                        print(f"[server] 픽업 명령 전송 실패 - 남은 픽업: {remaining}")
+                        print(f"[server] 픽업 진행 중단 - reason=send_failed, remaining={remaining}")
                     break
 
             if win32gui.GetForegroundWindow() != macro.lineage1_hwnd:
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
             time.sleep(0.1)
-            if received > 0:
+            if successful_pickups > 0:
                 macro.arduino_type_string(f"감사합니다!")
                 _last_type_string_time = time.time()
                 time.sleep(2.5)

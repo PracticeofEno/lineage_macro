@@ -782,7 +782,42 @@ def exchange_loop():
                     same_front_since = 0.0
                     print(f"[server] 장사 방향 변경: {shop_direction}")
 
-                if front_nickname and haste_result == "haste":
+                if front_nickname and haste_result != "haste":
+                    now = time.time()
+                    _, chat_message, chat_client_idx, chat_cooldown = _load_same_front_nickname_chat_config()
+                    chat_key = (front_nickname, haste_check_xy)
+                    can_send_chat = (
+                        bool(chat_message)
+                        and (
+                            same_front_last_chat_key != chat_key
+                            or now - same_front_last_chat_time >= chat_cooldown
+                        )
+                    )
+
+                    if can_send_chat:
+                        try:
+                            rendered_message = chat_message.format(nickname=front_nickname)
+                        except (IndexError, KeyError, ValueError):
+                            rendered_message = chat_message
+
+                        chat_client = _select_chat_client(clients_snapshot, chat_client_idx)
+                        if chat_client is None:
+                            print("[server] blocked_front_nickname chat skipped: no connected client")
+                        elif _send_client_chat(chat_client, rendered_message):
+                            same_front_last_chat_key = chat_key
+                            same_front_last_chat_time = now
+                            print(
+                                f"[server] blocked_front_nickname chat sent - "
+                                f"client_idx={chat_client.get('idx')}, nickname='{front_nickname}'"
+                            )
+                    else:
+                        print("[server] blocked_front_nickname chat skipped: cooldown or empty message")
+
+                    same_front_nickname = None
+                    same_front_xy = None
+                    same_front_since = 0.0
+
+                elif front_nickname and haste_result == "haste":
                     now = time.time()
                     if same_front_nickname == front_nickname and same_front_xy == haste_check_xy:
                         same_front_elapsed = now - same_front_since

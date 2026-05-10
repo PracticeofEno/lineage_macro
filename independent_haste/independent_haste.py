@@ -47,6 +47,7 @@ SAME_PICKUP_DELAY_SECONDS = 1.0
 
 # independent_haste_config.json에 same_nickname_turn_seconds가 없을 때의 기본값입니다. 0이면 비활성화입니다.
 SAME_NICKNAME_TURN_DEFAULT_SECONDS = 0.0
+NO_FRONT_NICKNAME_TURN_DEFAULT_SECONDS = 40.0
 
 # 상태 로그를 몇 초마다 출력할지 정하는 기본값입니다.
 STATUS_INTERVAL_DEFAULT_SECONDS = 3.0
@@ -198,6 +199,16 @@ def read_same_nickname_turn_seconds(data: dict) -> float:
     return max(0.0, seconds)
 
 
+def read_no_front_nickname_turn_seconds(data: dict) -> float:
+    try:
+        seconds = float(
+            data.get("no_front_nickname_turn_seconds", NO_FRONT_NICKNAME_TURN_DEFAULT_SECONDS)
+        )
+    except (TypeError, ValueError):
+        seconds = NO_FRONT_NICKNAME_TURN_DEFAULT_SECONDS
+    return max(0.0, seconds)
+
+
 def read_config_float(data: dict, key: str, default: float) -> float:
     try:
         value = float(data.get(key, default))
@@ -233,6 +244,8 @@ def build_role_command(role: str, args: argparse.Namespace, config: dict) -> lis
         command.extend(["--status-interval", str(args.status_interval)])
     if args.same_nickname_turn_seconds is not None:
         command.extend(["--same-nickname-turn-seconds", str(args.same_nickname_turn_seconds)])
+    if args.no_front_nickname_turn_seconds is not None:
+        command.extend(["--no-front-nickname-turn-seconds", str(args.no_front_nickname_turn_seconds)])
     return command
 
 
@@ -461,10 +474,17 @@ def read_adena_after_exchange(adena_before: int | None, timeout: float = 6.0) ->
 class IndependentHasteMacro:
     """server 또는 client 한 창을 독립적으로 담당하는 상태 머신입니다."""
 
-    def __init__(self, role: str, status_interval: float, same_nickname_turn_seconds: float):
+    def __init__(
+        self,
+        role: str,
+        status_interval: float,
+        same_nickname_turn_seconds: float,
+        no_front_nickname_turn_seconds: float,
+    ):
         self.role = role
         self.status_interval = status_interval
         self.same_nickname_turn_seconds = same_nickname_turn_seconds
+        self.no_front_nickname_turn_seconds = no_front_nickname_turn_seconds
         self.stage = "wait"
         self.base_shop_direction = macro.high_count_direction
         self.shop_direction = self.base_shop_direction
@@ -487,6 +507,8 @@ class IndependentHasteMacro:
         self.same_nickname: str | None = None
         self.same_nickname_xy: tuple[int, int] | None = None
         self.same_nickname_since = 0.0
+        self.no_front_nickname_xy: tuple[int, int] | None = None
+        self.no_front_nickname_since = 0.0
         self.exchange_window_nickname: str | None = None
         self.exchange_window_since = 0.0
         self.img = None
@@ -612,7 +634,8 @@ class IndependentHasteMacro:
         print(
             f"[{self.role}] direction={self.shop_direction}, "
             f"xy={status_xy}, MP={self.current_mp}, available={self.current_available}, "
-            f"same_nickname_turn_seconds={self.same_nickname_turn_seconds:.1f}"
+            f"same_nickname_turn_seconds={self.same_nickname_turn_seconds:.1f}, "
+            f"no_front_nickname_turn_seconds={self.no_front_nickname_turn_seconds:.1f}"
         )
         self.last_status_print_time = time.time()
 
@@ -634,6 +657,19 @@ class IndependentHasteMacro:
         self.same_nickname = nickname
         self.same_nickname_xy = check_xy
         self.same_nickname_since = now
+        return 0.0
+
+    def reset_no_front_nickname_tracking(self) -> None:
+        self.no_front_nickname_xy = None
+        self.no_front_nickname_since = 0.0
+
+    def update_no_front_nickname_tracking(self, check_xy: tuple[int, int]) -> float:
+        now = time.time()
+        if self.no_front_nickname_xy == check_xy:
+            return now - self.no_front_nickname_since
+
+        self.no_front_nickname_xy = check_xy
+        self.no_front_nickname_since = now
         return 0.0
 
     def reset_exchange_window_tracking(self) -> None:
@@ -669,6 +705,7 @@ class IndependentHasteMacro:
             self.last_return_check_time = time.time()
             self.last_shop_direction_force_time = time.time()
             self.reset_same_nickname_tracking()
+            self.reset_no_front_nickname_tracking()
             print(f"[{self.role}] direction changed -> {self.shop_direction}")
         else:
             print(f"[{self.role}] {label}; no alternate direction")
@@ -733,6 +770,8 @@ class IndependentHasteMacro:
         self.shop_direction = recover_direction
         self.was_low_mp = False
         self.last_shop_direction_force_time = time.time()
+        self.reset_same_nickname_tracking()
+        self.reset_no_front_nickname_tracking()
         return True
 
     def try_haste_front_person(self, check_xy: tuple[int, int], direction_change_nicknames: set[str]) -> str | None:
@@ -741,8 +780,31 @@ class IndependentHasteMacro:
         if not nickname:
             print(f"[{self.role}] no front nickname at {check_xy}")
             self.reset_same_nickname_tracking()
+            no_front_elapsed = self.update_no_front_nickname_tracking(check_xy)
+            if (
+                self.no_front_nickname_turn_seconds > 0
+                and no_front_elapsed >= self.no_front_nickname_turn_seconds
+            ):
+                direction = self.choose_shop_direction(
+                    None,
+                    exclude_current=True,
+                    label=f"no front nickname for {no_front_elapsed:.1f}s",
+                )
+                self.reset_no_front_nickname_tracking()
+                if direction is None:
+                    print(
+                        f"[{self.role}] no front nickname at {check_xy} "
+                        f"for {no_front_elapsed:.1f}s; no alternate direction"
+                    )
+                    return None
+                print(
+                    f"[{self.role}] no front nickname at {check_xy} "
+                    f"for {no_front_elapsed:.1f}s; switching to {direction}"
+                )
+                return direction
             return None
 
+        self.reset_no_front_nickname_tracking()
         if nickname in direction_change_nicknames:
             self.reset_same_nickname_tracking()
             direction = self.choose_shop_direction(
@@ -814,6 +876,7 @@ class IndependentHasteMacro:
 
         nickname = macro.readExchangeNickname(img=self.img)
         if nickname:
+            self.reset_no_front_nickname_tracking()
             if nickname in direction_change_nicknames:
                 print(f"[{self.role}] blocked exchange nickname '{nickname}' -> ESC")
                 self.key_press(win32con.VK_ESCAPE)
@@ -856,6 +919,7 @@ class IndependentHasteMacro:
                 self.last_return_check_time = time.time()
                 self.last_shop_direction_force_time = time.time()
                 self.reset_same_nickname_tracking()
+                self.reset_no_front_nickname_tracking()
                 print(f"[{self.role}] direction changed -> {self.shop_direction}")
             if haste_result:
                 time.sleep(0.5)
@@ -1029,6 +1093,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--no-front-nickname-turn-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Turn to another direction if no front nickname is detected for this many "
+            "seconds. Uses independent_haste_config.json no_front_nickname_turn_seconds "
+            "when omitted. 0 disables it."
+        ),
+    )
+    parser.add_argument(
         "--start-proxy",
         action="store_true",
         help="Also start arduino_proxy.py before server/client when launching both.",
@@ -1066,6 +1140,11 @@ def main() -> int:
     else:
         same_nickname_turn_seconds = max(0.0, args.same_nickname_turn_seconds)
 
+    if args.no_front_nickname_turn_seconds is None:
+        no_front_nickname_turn_seconds = read_no_front_nickname_turn_seconds(config)
+    else:
+        no_front_nickname_turn_seconds = max(0.0, args.no_front_nickname_turn_seconds)
+
     with input_lock():
         macro.init_setting(args.role)
 
@@ -1073,6 +1152,7 @@ def main() -> int:
         args.role,
         status_interval=status_interval,
         same_nickname_turn_seconds=same_nickname_turn_seconds,
+        no_front_nickname_turn_seconds=no_front_nickname_turn_seconds,
     )
     print(f"[{args.role}] standalone haste macro started. Press Ctrl+C to stop.")
     try:

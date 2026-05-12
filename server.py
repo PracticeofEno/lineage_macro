@@ -421,14 +421,33 @@ def _read_nickname_at_xy(check_xy: tuple[int, int]) -> str:
     return nickname
 
 
-def _try_haste_front_person(check_xy: tuple[int, int], direction_change_nicknames: set[str]) -> tuple[str | None, str]:
+def _turn_preferred_or_random(preferred_direction: str | None, excluded_direction: str) -> str | None:
+    if preferred_direction:
+        blocked_directions = _read_blocked_turn_directions(_load_macro_data())
+        if (
+            preferred_direction in TURN_DIRECTIONS
+            and preferred_direction != excluded_direction
+            and preferred_direction != macro.current_direction
+            and preferred_direction not in blocked_directions
+            and macro.turn_to(preferred_direction)
+        ):
+            return preferred_direction
+
+    return macro.turn_random_excluding(excluded_direction)
+
+
+def _try_haste_front_person(
+    check_xy: tuple[int, int],
+    direction_change_nicknames: set[str],
+    preferred_turn_direction: str | None = None,
+) -> tuple[str | None, str]:
     nickname = _read_nickname_at_xy(check_xy)
     if not nickname:
         print(f"[server] 헤이스트 확인 - nickname=없음, xy={check_xy}")
         return None, ""
 
     if nickname in direction_change_nicknames:
-        direction = macro.turn_random_excluding(macro.low_count_direction)
+        direction = _turn_preferred_or_random(preferred_turn_direction, macro.low_count_direction)
         if direction is None:
             print(f"[server] 헤이스트 차단 - nickname='{nickname}', xy={check_xy}, turn=failed")
             return None, nickname
@@ -508,6 +527,7 @@ def exchange_loop():
     _last_shop_direction_force_time = time.time()
     base_shop_direction = macro.high_count_direction
     shop_direction = base_shop_direction
+    preferred_turn_direction = "northeast" if base_shop_direction == "southeast" else None
     was_low_mp = False
     clients_snapshot = []
     prev_stage = None
@@ -541,7 +561,7 @@ def exchange_loop():
         nonlocal shop_direction, _last_return_check_time, _last_shop_direction_force_time
         nonlocal same_front_nickname, same_front_xy, same_front_since
 
-        direction = macro.turn_random_excluding(macro.low_count_direction)
+        direction = _turn_preferred_or_random(preferred_turn_direction, macro.low_count_direction)
         if direction is None:
             print(
                 f"[server] 장사 방향 변경 실패 - source={source}, "
@@ -773,7 +793,11 @@ def exchange_loop():
 
             if time.time() - _last_haste_check_time >= haste_check_interval:
                 _last_haste_check_time = time.time()
-                haste_result, front_nickname = _try_haste_front_person(haste_check_xy, direction_change_nicknames)
+                haste_result, front_nickname = _try_haste_front_person(
+                    haste_check_xy,
+                    direction_change_nicknames,
+                    preferred_turn_direction,
+                )
                 if haste_result and haste_result != "haste":
                     shop_direction = haste_result
                     _last_return_check_time = time.time()

@@ -34,7 +34,7 @@ POTION_COOLDOWN = 600
 
 # 개별 창의 헤이스트 가능 횟수가 이 값 이하이면 MP 포션 사용 후보로 봅니다.
 # macro_data.json의 direction_threshold와 다릅니다. 이 값은 "포션 사용 기준"입니다.
-LOW_MP_AVAILABLE_THRESHOLD = 2
+LOW_MP_AVAILABLE_THRESHOLD = 1
 
 # macro_data.json의 haste_check_interval_seconds가 없거나 잘못됐을 때만 쓰는 기본값입니다.
 HASTE_CHECK_DEFAULT_INTERVAL = 3.0
@@ -55,11 +55,7 @@ SAME_FRONT_NICKNAME_CHAT_DEFAULT_COOLDOWN_SECONDS = 60.0
 LOW_MP_MESSAGE_DEFAULT_INTERVAL_SECONDS = 20.0
 
 # macro_data.json의 low_mp_messages가 없거나 비어 있을 때만 쓰는 기본 안내 문구 목록입니다.
-LOW_MP_MESSAGES_DEFAULT = (
-    "죄송합니다. MP회복중입니다.",
-    "잠시만 기다려주세요. MP회복중입니다.",
-    "MP 회복 후 바로 진행하겠습니다.",
-)
+LOW_MP_MESSAGES_DEFAULT = ('\'')
 
 # 장사 가능 상태에서 방향 클릭이 씹힌 경우를 보정하려고 같은 장사 방향을 다시 누르는 간격(초)입니다.
 SHOP_DIRECTION_FORCE_INTERVAL_SECONDS = 15.0
@@ -88,21 +84,34 @@ TURN_DIRECTIONS = (
 # lock : ping-pong과 pickup 명령이 같은 소켓을 동시에 사용하지 않도록 보호
 _clients: list[dict] = []
 _clients_lock = threading.Lock()
+_macro_data_write_lock = threading.Lock()
 
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
 _server_running = True  # accept 루프 제어 (q 입력 시에만 False)
 
 
-def _read_direction_change_nicknames(data: dict) -> set[str]:
-    raw_nicknames = data.get("direction_change_nicknames", data.get("direction_change_nickname", []))
+def _normalize_nickname_list(raw_nicknames) -> list[str]:
     if isinstance(raw_nicknames, str):
         nicknames = [raw_nicknames]
     elif isinstance(raw_nicknames, (list, tuple, set)):
         nicknames = raw_nicknames
     else:
         nicknames = []
-    return {str(n).strip() for n in nicknames if str(n).strip()}
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for nickname in nicknames:
+        value = str(nickname).strip()
+        if value and value not in seen:
+            normalized.append(value)
+            seen.add(value)
+    return normalized
+
+
+def _read_direction_change_nicknames(data: dict) -> set[str]:
+    raw_nicknames = data.get("direction_change_nicknames", data.get("direction_change_nickname", []))
+    return set(_normalize_nickname_list(raw_nicknames))
 
 
 def _read_blocked_turn_directions(data: dict) -> set[str]:
@@ -120,6 +129,36 @@ def _load_macro_data() -> dict:
     data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
     with open(data_path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _write_macro_data(data: dict) -> None:
+    data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
+    tmp_path = f"{data_path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+        f.write("\n")
+    os.replace(tmp_path, data_path)
+
+
+def _add_direction_change_nickname(nickname: str) -> bool:
+    nickname = str(nickname).strip()
+    if not nickname:
+        return False
+
+    with _macro_data_write_lock:
+        data = _load_macro_data()
+        nicknames = _normalize_nickname_list(
+            data.get("direction_change_nicknames", data.get("direction_change_nickname", []))
+        )
+        if nickname in nicknames:
+            return False
+
+        nicknames.append(nickname)
+        data["direction_change_nicknames"] = nicknames
+        _write_macro_data(data)
+
+    print(f"[server] 지정 닉네임 자동 추가 - nickname='{nickname}'")
+    return True
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -598,34 +637,39 @@ def exchange_loop():
             elapsed = 0.0
 
         chat_seconds, chat_message, chat_client_idx, chat_cooldown = _load_same_front_nickname_chat_config()
-        chat_key = ("exchange", nickname)
-        if (
-            chat_seconds <= 0
-            or not chat_message
-            or elapsed < chat_seconds
-            or (
-                exchange_window_last_chat_key == chat_key
-                and now - exchange_window_last_chat_time < chat_cooldown
-            )
-        ):
+        if chat_seconds <= 0 or elapsed < chat_seconds:
             return False
 
-        try:
-            rendered_message = chat_message.format(nickname=nickname)
-        except (IndexError, KeyError, ValueError):
-            rendered_message = chat_message
+        _add_direction_change_nickname(nickname)
+
+        chat_key = ("exchange", nickname)
 
         print(f"[server] 거래창 유지 감지 - nickname='{nickname}', elapsed={elapsed:.1f}s, action=esc_and_client_chat")
         macro.key_press(win32con.VK_ESCAPE)
         time.sleep(0.2)
 
-        chat_client = _select_chat_client(clients_snapshot, chat_client_idx)
-        if chat_client is None:
-            print("[server] 채팅 명령 스킵 - reason=no_connected_client, source=exchange_window")
-        elif _send_client_chat(chat_client, rendered_message):
-            exchange_window_last_chat_key = chat_key
-            exchange_window_last_chat_time = now
-            print(f"[server] 채팅 명령 완료 - client_idx={chat_client.get('idx')}, source=exchange_window")
+        can_send_chat = (
+            bool(chat_message)
+            and (
+                exchange_window_last_chat_key != chat_key
+                or now - exchange_window_last_chat_time >= chat_cooldown
+            )
+        )
+        if can_send_chat:
+            try:
+                rendered_message = chat_message.format(nickname=nickname)
+            except (IndexError, KeyError, ValueError):
+                rendered_message = chat_message
+
+            chat_client = _select_chat_client(clients_snapshot, chat_client_idx)
+            if chat_client is None:
+                print("[server] 채팅 명령 스킵 - reason=no_connected_client, source=exchange_window")
+            elif _send_client_chat(chat_client, rendered_message):
+                exchange_window_last_chat_key = chat_key
+                exchange_window_last_chat_time = now
+                print(f"[server] 채팅 명령 완료 - client_idx={chat_client.get('idx')}, source=exchange_window")
+        else:
+            print("[server] 채팅 명령 스킵 - reason=cooldown_or_empty_message, source=exchange_window")
 
         turn_after_same_nickname_timeout("exchange_window", nickname, elapsed)
         reset_trade_state()
@@ -853,15 +897,18 @@ def exchange_loop():
 
                     chat_seconds, chat_message, chat_client_idx, chat_cooldown = _load_same_front_nickname_chat_config()
                     chat_key = (front_nickname, haste_check_xy)
+                    same_front_timed_out = chat_seconds > 0 and same_front_elapsed >= chat_seconds
                     can_send_chat = (
-                        chat_seconds > 0
+                        same_front_timed_out
                         and chat_message
-                        and same_front_elapsed >= chat_seconds
                         and (
                             same_front_last_chat_key != chat_key
                             or now - same_front_last_chat_time >= chat_cooldown
                         )
                     )
+                    if same_front_timed_out:
+                        _add_direction_change_nickname(front_nickname)
+
                     if can_send_chat:
                         try:
                             rendered_message = chat_message.format(nickname=front_nickname)
@@ -879,6 +926,10 @@ def exchange_loop():
                                 f"source=same_front_nickname, nickname='{front_nickname}', "
                                 f"elapsed={same_front_elapsed:.1f}s"
                             )
+                    elif same_front_timed_out:
+                        print("[server] 채팅 명령 스킵 - reason=cooldown_or_empty_message, source=same_front_nickname")
+
+                    if same_front_timed_out:
                         turn_after_same_nickname_timeout(
                             "same_front_nickname",
                             front_nickname,

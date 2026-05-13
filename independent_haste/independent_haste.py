@@ -47,7 +47,7 @@ SAME_PICKUP_DELAY_SECONDS = 1.0
 
 # independent_haste_config.json에 same_nickname_turn_seconds가 없을 때의 기본값입니다. 0이면 비활성화입니다.
 SAME_NICKNAME_TURN_DEFAULT_SECONDS = 0.0
-NO_FRONT_NICKNAME_TURN_DEFAULT_SECONDS = 40.0
+NO_FRONT_NICKNAME_TURN_DEFAULT_SECONDS = 35.0
 
 # 상태 로그를 몇 초마다 출력할지 정하는 기본값입니다.
 STATUS_INTERVAL_DEFAULT_SECONDS = 3.0

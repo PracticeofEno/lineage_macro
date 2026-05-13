@@ -81,36 +81,36 @@
     ],
     "client_numbering_mouse_x_y_by_direction": {
         "north": [
-            1359,
-            314
+            650,
+            350
         ],
         "northeast": [
-            1359,
-            314
+            690,
+            342
         ],
         "east": [
-            1359,
-            314
+            730,
+            390
         ],
         "southeast": [
-            1359,
-            314
+            690,
+            439
         ],
         "south": [
-            1359,
-            314
+            650,
+            430
         ],
         "southwest": [
-            1359,
-            314
+            610,
+            444
         ],
         "west": [
-            1359,
-            314
+            570,
+            390
         ],
         "northwest": [
-            1359,
-            314
+            610,
+            342
         ]
     },
     "haste_check_interval_seconds": 3.0,
@@ -122,62 +122,57 @@
     "direction_change_nicknames": [
         "질서유지",
         "핑진시",
-        "헤이스트가게",
-        "가게여직원",
         "빨강농장",
         "보라농장",
         "김남진",
         "타쓰지",
-        "헤이왕m",
-        "헤이왕v",
-        "오우거혁띠",
-        "골무스테파니",
-        "자판기3c"
+        "방문환영",
+        "dsafjakdc",
+        "헤이로옷산다",
+        "윤짱",
+        "헤이로집산다",
+        "헤이로밥산다",
+        "버프여신"
     ],
-    "blocked_turn_directions": [
-        "north",
-        "east",
-        "south",
-        "west"
-    ],
+    "blocked_turn_directions": [],
     "direction_threshold": 6,
-    "adena_per_pickup": 100,
-    "adena_three_pickup_price": 300,
-    "adena_six_pickup_price": 600,
+    "adena_per_pickup": 150,
+    "adena_three_pickup_price": 450,
+    "adena_six_pickup_price": 900,
     "current_direction": "north",
-    "low_count_direction": "northwest",
+    "low_count_direction": "southeast",
     "high_count_direction": "northwest",
     "turn_north_xy": [
-        654,
-        292
+        650,
+        350
     ],
     "turn_northeast_xy": [
-        816,
-        302
+        690,
+        390
     ],
     "turn_east_xy": [
-        770,
-        394
+        730,
+        390
     ],
     "turn_southeast_xy": [
-        810,
-        544
+        690,
+        440
     ],
     "turn_south_xy": [
-        654,
-        584
+        650,
+        430
     ],
     "turn_southwest_xy": [
-        376,
-        528
+        610,
+        440
     ],
     "turn_west_xy": [
-        336,
-        399
+        570,
+        390
     ],
     "turn_northwest_xy": [
-        429,
-        234
+        610,
+        390
     ],
     "_comment_directions": "north, northeast, east, southeast, south, southwest, west, northwest"
 }

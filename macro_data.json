@@ -16,7 +16,7 @@
         "low_mp_message_interval_seconds": "MP 회복중 상태에서 안내 채팅을 다시 치기 전 기다리는 시간(초)입니다. 없거나 잘못되면 server.py의 LOW_MP_MESSAGE_DEFAULT_INTERVAL_SECONDS를 씁니다.",
         "low_mp_messages": "MP 회복중일 때 순서대로 돌아가며 입력할 채팅 문구 목록입니다. 마지막 문구 후에는 다시 첫 문구부터 반복합니다.",
         "target_check_failed_message": "픽업 전 타겟 닉네임 확인을 10번 실패했을 때 해당 픽업을 스킵하고 입력할 채팅 문구입니다. {nickname}은 거래창 닉네임, {fail_count}는 누적 실패 횟수입니다.",
-        "direction_change_nicknames": "이 목록에 있는 닉네임이 앞좌표 또는 거래창에서 감지되면 거래를 피하거나 방향전환 대상으로 봅니다.",
+        "direction_change_nicknames": "이 목록에 있는 닉네임이 앞좌표 또는 거래창에서 감지되면 거래를 피하거나 방향전환 대상으로 봅니다. 같은 닉네임이 설정 시간 이상 감지되면 server.py가 여기에 자동 추가합니다.",
         "blocked_turn_directions": "자동 방향전환 후보에서 제외할 방향 목록입니다. 여기에 넣은 방향으로는 랜덤 방향전환하지 않습니다.",
         "direction_threshold": "전체 남은 헤이스트 가능 횟수가 이 값보다 낮으면 MP 부족으로 보고 low_count_direction을 봅니다. server.py의 LOW_MP_AVAILABLE_THRESHOLD와 다릅니다.",
         "adena_per_pickup": "일반 1방 가격입니다. 3방/6방 특가와 정확히 일치하지 않는 금액은 이 값으로 나눠 pickup 횟수를 계산합니다.",
@@ -35,7 +35,10 @@
         "turn_northwest_xy": "northwest 방향으로 돌 때 shift+좌클릭할 좌표입니다.",
         "_comment_directions": "설정에서 사용할 수 있는 방향 이름 목록입니다. north, northeast, east, southeast, south, southwest, west, northwest 중 하나를 씁니다."
     },
-    "server_mouse_x_y": [690, 415],
+    "server_mouse_x_y": [
+        610,
+        355
+    ],
     "server_mouse_x_y_by_direction": {
         "north": [
             650,
@@ -43,7 +46,7 @@
         ],
         "northeast": [
             690,
-            350
+            340
         ],
         "east": [
             730,
@@ -51,7 +54,7 @@
         ],
         "southeast": [
             690,
-            400
+            420
         ],
         "south": [
             650,
@@ -70,73 +73,145 @@
             355
         ]
     },
-    "client_mouse_x_y": [730, 435],
+    "client_mouse_x_y": [
+        570,
+        340
+    ],
     "client_mouse_x_y_by_direction": {
-        "north": [650, 350],
-        "northeast": [730, 370],
-        "east": [730, 390],
-        "southeast": [730, 430],
-        "south": [650, 430],
-        "southwest": [650, 430],
-        "west": [570, 390],
-        "northwest": [610, 370]
+        "north": [
+            650,
+            350
+        ],
+        "northeast": [
+            650,
+            350
+        ],
+        "east": [
+            730,
+            390
+        ],
+        "southeast": [
+            730,
+            420
+        ],
+        "south": [
+            650,
+            430
+        ],
+        "southwest": [
+            570,
+            380
+        ],
+        "west": [
+            570,
+            390
+        ],
+        "northwest": [
+            570,
+            340
+        ]
     },
     "client_numbering_mouse_x_y": [
         1359,
         314
     ],
     "client_numbering_mouse_x_y_by_direction": {
-        "north": [1359, 314],
-        "northeast": [1359, 314],
-        "east": [1359, 314],
-        "southeast": [1359, 314],
-        "south": [1359, 314],
-        "southwest": [1359, 314],
-        "west": [1359, 314],
-        "northwest": [1359, 314]
+        "north": [
+            1359,
+            314
+        ],
+        "northeast": [
+            1359,
+            314
+        ],
+        "east": [
+            1359,
+            314
+        ],
+        "southeast": [
+            1359,
+            314
+        ],
+        "south": [
+            1359,
+            314
+        ],
+        "southwest": [
+            1359,
+            314
+        ],
+        "west": [
+            1359,
+            314
+        ],
+        "northwest": [
+            1359,
+            314
+        ]
     },
     "haste_check_interval_seconds": 3.0,
-    "same_front_nickname_chat_seconds": 30.0,
+    "same_front_nickname_chat_seconds": 60.0,
     "same_front_nickname_chat_client_idx": 1,
     "same_front_nickname_chat_cooldown_seconds": 15.0,
     "same_front_nickname_client_message": "\"{nickname} 꼬장 알림",
-    "low_mp_message_interval_seconds": 20.0,
-    "low_mp_messages": [
-        "죄송합니다. MP회복중입니다."
-    ],
+    "low_mp_message_interval_seconds": 60.0,
+    "low_mp_messages": [],
     "target_check_failed_message": "{nickname}님 정면에 위치해주시기 바랍니다.",
-    "direction_change_nicknames": ["타쓰지", "김남진"],
-    "blocked_turn_directions": ["north", "east", "south", "west"],
+    "direction_change_nicknames": [
+        "타쓰지",
+        "김남진",
+        "스파이더마인",
+        "오태식이",
+        "dsafjakdc",
+        "바란서유지",
+        "발란스",
+        "지브즈",
+        "KOREAN"
+    ],
+    "blocked_turn_directions": [
+        "north",
+        "east",
+        "south",
+        "west"
+    ],
     "direction_threshold": 6,
     "adena_per_pickup": 150,
     "adena_three_pickup_price": 450,
     "adena_six_pickup_price": 900,
     "current_direction": "north",
-    "low_count_direction": "northwest",
-    "high_count_direction": "southeast",
+    "low_count_direction": "southeast",
+    "high_count_direction": "northwest",
     "turn_north_xy": [
-        650, 350
+        650,
+        350
     ],
     "turn_northeast_xy": [
-        690, 400
+        690,
+        400
     ],
     "turn_east_xy": [
-        730, 390
+        730,
+        390
     ],
     "turn_southeast_xy": [
-        690, 435
+        690,
+        435
     ],
     "turn_south_xy": [
-        650, 430
+        650,
+        430
     ],
     "turn_southwest_xy": [
-        610, 430
+        610,
+        430
     ],
     "turn_west_xy": [
-        570, 390
+        570,
+        390
     ],
     "turn_northwest_xy": [
-        600, 385
+        600,
+        385
     ],
     "_comment_directions": "north, northeast, east, southeast, south, southwest, west, northwest"
 }

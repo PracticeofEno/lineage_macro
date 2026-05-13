@@ -165,7 +165,7 @@ class WindowTitleChanger(tk.Tk):
 
         quick = ttk.Frame(bottom)
         quick.grid(row=2, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
-        for value in ("server", "client", "client2", "client3"):
+        for value in ("server", "client", "client2", "client3", "Lineage Classic"):
             ttk.Button(quick, text=value, command=lambda title=value: self.set_quick_title(title)).pack(
                 side="left",
                 padx=(0, 6),

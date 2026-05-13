@@ -774,6 +774,32 @@ class IndependentHasteMacro:
         self.reset_no_front_nickname_tracking()
         return True
 
+    def try_return_to_base_direction(self, direction_change_nicknames: set[str]) -> bool:
+        """Check high_count_direction and return to it when it is available."""
+        blocked_directions = read_blocked_turn_directions(load_macro_data())
+        if self.base_shop_direction in blocked_directions:
+            print(f"[{self.role}] return check blocked direction -> {self.base_shop_direction}")
+            return False
+
+        check_xy = macro.get_configured_mouse_xy(direction=self.base_shop_direction)
+        base_nickname = read_nickname_at_xy(check_xy)
+        if base_nickname in direction_change_nicknames:
+            print(
+                f"[{self.role}] return check blocked by '{base_nickname}' "
+                f"at {check_xy} -> {self.base_shop_direction}"
+            )
+            return False
+
+        self.shop_direction = self.base_shop_direction
+        self.last_shop_direction_force_time = time.time()
+        self.reset_same_nickname_tracking()
+        self.reset_no_front_nickname_tracking()
+        print(
+            f"[{self.role}] return check clear: nickname='{base_nickname}' "
+            f"at {check_xy}; direction changed -> {self.shop_direction}"
+        )
+        return True
+
     def try_haste_front_person(self, check_xy: tuple[int, int], direction_change_nicknames: set[str]) -> str | None:
         """앞 사람 닉네임을 읽고, 차단/장기정체/정상 헤이스트 여부를 판단합니다."""
         nickname = read_nickname_at_xy(check_xy)
@@ -902,12 +928,7 @@ class IndependentHasteMacro:
             and time.time() - self.last_return_check_time >= DIRECTION_RETURN_CHECK_INTERVAL
         ):
             self.last_return_check_time = time.time()
-            check_xy = macro.get_configured_mouse_xy(direction=self.shop_direction)
-            base_nickname = read_nickname_at_xy(check_xy)
-            if base_nickname in direction_change_nicknames:
-                print(f"[{self.role}] return check blocked by '{base_nickname}' at {check_xy}")
-            else:
-                print(f"[{self.role}] return check clear: nickname='{base_nickname}' at {check_xy}")
+            self.try_return_to_base_direction(direction_change_nicknames)
             time.sleep(0.5)
             return
 

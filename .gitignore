@@ -5,3 +5,4 @@ data/
 data2/
 *.json
 independent_haste/.independent_haste.lock
+independent_haste/.f12_stop

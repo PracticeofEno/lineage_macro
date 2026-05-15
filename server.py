@@ -89,6 +89,32 @@ _macro_data_write_lock = threading.Lock()
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
 _server_running = True  # accept 루프 제어 (q 입력 시에만 False)
+_f12_stop_reported = False
+
+
+def _is_f12_pressed() -> bool:
+    state = win32api.GetAsyncKeyState(win32con.VK_F12)
+    return bool(state & 0x8000 or state & 0x0001)
+
+
+def _request_f12_stop() -> bool:
+    global running, _f12_stop_reported
+    if not _is_f12_pressed():
+        return False
+    running = False
+    if not _f12_stop_reported:
+        print("[server] F12 emergency stop")
+        _f12_stop_reported = True
+    return True
+
+
+def _sleep_interruptible(seconds: float) -> bool:
+    deadline = time.time() + max(0.0, seconds)
+    while time.time() < deadline:
+        if _request_f12_stop():
+            return True
+        time.sleep(min(0.05, deadline - time.time()))
+    return False
 
 
 def _normalize_nickname_list(raw_nicknames) -> list[str]:
@@ -258,7 +284,8 @@ def _handle_client(conn: socket.socket, addr: tuple):
                         client["mp"] = int(mp)
                         client["available"] = int(client["mp"] // 20)
                     # print(f"[server] client {addr} MP: {client['mp']}  available: {client['available']}")
-            time.sleep(2)
+            if _sleep_interruptible(2):
+                break
     finally:
         _remove_client(client)
 
@@ -438,7 +465,8 @@ def _read_adena_after_exchange(adena_before: int | None, timeout: float = 6.0) -
             return last_value
 
         print(f"[server] 아데나 재확인 중: before={adena_before}, current={last_value}")
-        time.sleep(0.5)
+        if _sleep_interruptible(0.5):
+            return last_value
 
 
 def _clear_chat_input() -> None:
@@ -646,7 +674,8 @@ def exchange_loop():
 
         print(f"[server] 거래창 유지 감지 - nickname='{nickname}', elapsed={elapsed:.1f}s, action=esc_and_client_chat")
         macro.key_press(win32con.VK_ESCAPE)
-        time.sleep(0.2)
+        if _sleep_interruptible(0.2):
+            return True
 
         can_send_chat = (
             bool(chat_message)
@@ -673,7 +702,7 @@ def exchange_loop():
 
         turn_after_same_nickname_timeout("exchange_window", nickname, elapsed)
         reset_trade_state()
-        time.sleep(0.5)
+        _sleep_interruptible(0.5)
         return True
 
     def type_next_low_mp_message(force: bool = False) -> bool:
@@ -691,11 +720,15 @@ def exchange_loop():
         return True
 
     while running:
+        if _request_f12_stop():
+            break
+
         # 이전 stage가 READ_ADENA 이상이었을 경우 WAIT_NICKNAME 복귀 시 TAB + 타겟 리셋
         if stage != prev_stage:
             if stage == WAIT_NICKNAME and prev_stage is not None and prev_stage >= READ_ADENA:
                 macro.key_press(win32con.VK_TAB)
-                time.sleep(0.3)
+                if _sleep_interruptible(0.3):
+                    break
             prev_stage = stage
 
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
@@ -725,12 +758,16 @@ def exchange_loop():
             for e in clients_snapshot:
                 elapsed = time.time() - _last_potion_idx_time.get(e["idx"], 0)
                 if elapsed < SAME_UNIT_DELAY:
-                    time.sleep(SAME_UNIT_DELAY - elapsed)
+                    if _sleep_interruptible(SAME_UNIT_DELAY - elapsed):
+                        break
                 if _try_use_potion(e):
                     _last_potion_idx_time[e["idx"]] = time.time()
                     if e["idx"] == 0 and "conn" in e:
-                        time.sleep(0.5)
+                        if _sleep_interruptible(0.5):
+                            break
                         macro.force_set_foreground_window(macro.lineage1_hwnd)
+            if not running:
+                break
 
             total_count = sum(e["available"] for e in clients_snapshot)
             should_face_low = total_count < macro.direction_threshold
@@ -751,13 +788,15 @@ def exchange_loop():
                     sent_low_mp_message = type_next_low_mp_message(force=True)
                 if not sent_low_mp_message:
                     type_next_low_mp_message()
-                time.sleep(0.5)
+                if _sleep_interruptible(0.5):
+                    break
                 continue
             else:
                 if was_low_mp:
                     recover_direction = _choose_recovered_shop_direction(macro.high_count_direction)
                     if recover_direction is None:
-                        time.sleep(0.5)
+                        if _sleep_interruptible(0.5):
+                            break
                         continue
 
                     shop_direction = recover_direction
@@ -785,7 +824,8 @@ def exchange_loop():
                     print(f"[server] 지정 닉네임 거래창 감지: '{nickname}' -> ESC")
                     macro.key_press(win32con.VK_ESCAPE)
                     reset_exchange_window_tracking()
-                    time.sleep(0.5)
+                    if _sleep_interruptible(0.5):
+                        break
                     continue
 
                 greeted_nickname = nickname
@@ -798,7 +838,8 @@ def exchange_loop():
                     print(f"[server] 장사 방향 주기 보정 -> {shop_direction}")
                     img = macro.screenshot(hwnd=macro.lineage1_hwnd)
                 _last_shop_direction_force_time = time.time()
-                time.sleep(0.2)
+                if _sleep_interruptible(0.2):
+                    break
                 continue
 
             if (
@@ -814,7 +855,8 @@ def exchange_loop():
                         f"[server] 기본 방향 복귀 보류 - nickname='{base_nickname}', "
                         f"xy={base_check_xy}, current_direction={shop_direction}"
                     )
-                    time.sleep(0.5)
+                    if _sleep_interruptible(0.5):
+                        break
                     continue
 
                 if macro.turn_to(base_shop_direction, force=True):
@@ -832,7 +874,8 @@ def exchange_loop():
                         f"[server] 기본 방향 복귀 실패 - nickname='{base_nickname}', "
                         f"xy={base_check_xy}, direction={base_shop_direction}"
                     )
-                time.sleep(0.5)
+                if _sleep_interruptible(0.5):
+                    break
                 continue
 
             if time.time() - _last_haste_check_time >= haste_check_interval:
@@ -941,10 +984,12 @@ def exchange_loop():
                     same_front_since = 0.0
 
                 if haste_result:
-                    time.sleep(HASTE_AFTER_F7_WAIT_SECONDS)
+                    if _sleep_interruptible(HASTE_AFTER_F7_WAIT_SECONDS):
+                        break
                     continue
 
-            time.sleep(0.5)
+            if _sleep_interruptible(0.5):
+                break
 
         # ── Stage 2: 교환 전 아데나 1회 측정 ────────────────────────────────
         elif stage == READ_ADENA:
@@ -959,7 +1004,8 @@ def exchange_loop():
                 macro.key_press(win32con.VK_ESCAPE)
                 reset_exchange_window_tracking()
                 stage = WAIT_NICKNAME
-                time.sleep(0.5)
+                if _sleep_interruptible(0.5):
+                    break
                 continue
             if handle_exchange_window_timeout(exchange_nickname):
                 continue
@@ -986,7 +1032,8 @@ def exchange_loop():
                 brightness_changed = True
                 macro.acceptExchange()
             prev_brightness = brightness
-            time.sleep(EXCHANGE_MONITOR_INTERVAL_SECONDS)
+            if _sleep_interruptible(EXCHANGE_MONITOR_INTERVAL_SECONDS):
+                break
 
         # ── Stage 4: 받은 아데나 계산 → 서버/클라이언트 픽업 분배 ──────────
         elif stage == PICKUP:
@@ -1008,7 +1055,8 @@ def exchange_loop():
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
                 macro.arduino_type_string("아데나를 받지 못 했습니다.")
                 _last_type_string_time = time.time()
-                time.sleep(1.0)
+                if _sleep_interruptible(1.0):
+                    break
                 stage = WAIT_NICKNAME
                 greeted_nickname = None
                 adena_before = None
@@ -1021,7 +1069,8 @@ def exchange_loop():
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
                 macro.arduino_type_string(f"아데나가 부족합니다. 1방 {macro.adena_per_pickup}원입니다.")
                 _last_type_string_time = time.time()
-                time.sleep(1.0)
+                if _sleep_interruptible(1.0):
+                    break
                 stage = WAIT_NICKNAME
                 greeted_nickname = None
                 adena_before = None
@@ -1050,7 +1099,9 @@ def exchange_loop():
             # 같은 idx는 SAME_UNIT_DELAY 이내 재전송 금지
             last_idx_time: dict = {}
 
-            while remaining > 0:
+            while remaining > 0 and running:
+                if _request_f12_stop():
+                    break
                 with_avail = [c for c in clients_snapshot if pickup_avail[id(c)] > 0]
                 if not with_avail:
                     break
@@ -1067,7 +1118,8 @@ def exchange_loop():
                         break
                     elapsed = time.time() - last_idx_time.get(c["idx"], 0)
                     if elapsed < SAME_UNIT_DELAY:
-                        time.sleep(SAME_UNIT_DELAY - elapsed)
+                        if _sleep_interruptible(SAME_UNIT_DELAY - elapsed):
+                            break
 
                     pickup_skipped = False
                     if "conn" not in c:
@@ -1103,13 +1155,18 @@ def exchange_loop():
                         print(f"[server] 픽업 진행 중단 - reason=send_failed, remaining={remaining}")
                     break
 
+            if not running:
+                break
+
             if win32gui.GetForegroundWindow() != macro.lineage1_hwnd:
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
-            time.sleep(0.1)
+            if _sleep_interruptible(0.1):
+                break
             if successful_pickups > 0:
                 macro.arduino_type_string(f"감사합니다!")
                 _last_type_string_time = time.time()
-                time.sleep(2.5)
+                if _sleep_interruptible(2.5):
+                    break
 
             stage = WAIT_NICKNAME
             greeted_nickname = None
@@ -1149,6 +1206,7 @@ if __name__ == "__main__":
             else:
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
                 running = True
+                _f12_stop_reported = False
                 exchange_thread = threading.Thread(target=exchange_loop, daemon=True)
                 exchange_thread.start()
         if cmd == "2":

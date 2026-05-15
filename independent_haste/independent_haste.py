@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 
+import win32api
 import win32con
 
 import macro
@@ -22,6 +23,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MACRO_DATA_PATH = os.path.join(BASE_DIR, "macro_data.json")
 INDEPENDENT_HASTE_CONFIG_PATH = os.path.join(BASE_DIR, "independent_haste_config.json")
 INPUT_LOCK_PATH = os.path.join(BASE_DIR, ".independent_haste.lock")
+F12_STOP_PATH = os.path.join(BASE_DIR, ".f12_stop")
+CHILD_PROCESS_ENV = "INDEPENDENT_HASTE_CHILD"
+_f12_stop_reported = False
 
 # 자주 바꾸는 운영 기준값입니다. 좌표/방향/가격은 macro_data.json에서 관리합니다.
 # 헤이스트 가능 횟수(current_available)가 이 값 이하이면 MP 포션(F8)을 사용합니다.
@@ -79,6 +83,52 @@ TURN_DIRECTIONS = (
     "west",
     "northwest",
 )
+
+
+def clear_f12_stop_request() -> None:
+    try:
+        os.remove(F12_STOP_PATH)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        print(f"[f12] failed to clear stop request: {exc}")
+
+
+def _write_f12_stop_request() -> None:
+    if os.path.exists(F12_STOP_PATH):
+        return
+    try:
+        with open(F12_STOP_PATH, "w", encoding="ascii") as f:
+            f.write(str(time.time()))
+    except OSError as exc:
+        print(f"[f12] failed to write stop request: {exc}")
+
+
+def is_f12_stop_requested() -> bool:
+    state = win32api.GetAsyncKeyState(win32con.VK_F12)
+    if state & 0x8000 or state & 0x0001:
+        _write_f12_stop_request()
+        return True
+    return os.path.exists(F12_STOP_PATH)
+
+
+def request_f12_stop(label: str) -> bool:
+    global _f12_stop_reported
+    if not is_f12_stop_requested():
+        return False
+    if not _f12_stop_reported:
+        print(f"[{label}] F12 stop")
+        _f12_stop_reported = True
+    return True
+
+
+def sleep_interruptible(seconds: float, label: str = "macro") -> bool:
+    deadline = time.time() + max(0.0, seconds)
+    while time.time() < deadline:
+        if request_f12_stop(label):
+            return True
+        time.sleep(min(0.05, deadline - time.time()))
+    return False
 
 
 def load_macro_data() -> dict:
@@ -279,6 +329,7 @@ def launch_child_process(label: str, command: list[str], dry_run: bool) -> subpr
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
+    env[CHILD_PROCESS_ENV] = "1"
     process = subprocess.Popen(
         command,
         cwd=BASE_DIR,
@@ -335,14 +386,19 @@ def start_independent_processes(
         print("[independent] 이미 실행 중입니다.")
         return
 
+    clear_f12_stop_request()
+
     if read_config_bool(config, "start_arduino_proxy", False) or args.start_proxy:
         if not is_process_alive(processes.get("proxy")):
             processes["proxy"] = launch_child_process("proxy", build_proxy_command(config), False)
-            time.sleep(1.0)
+            if sleep_interruptible(1.0, "launcher"):
+                return
 
     processes["server"] = launch_child_process("server", build_role_command("server", args, config), False)
     start_delay = read_config_float(config, "start_delay_seconds", DUAL_START_DELAY_DEFAULT_SECONDS)
-    time.sleep(max(0.0, start_delay))
+    if sleep_interruptible(max(0.0, start_delay), "launcher"):
+        stop_independent_processes(processes)
+        return
     processes["client"] = launch_child_process("client", build_role_command("client", args, config), False)
     print("[independent] server/client 독립 매크로 시작")
 
@@ -468,7 +524,8 @@ def read_adena_after_exchange(adena_before: int | None, timeout: float = 6.0) ->
             return last_value
 
         print(f"[solo] adena recheck: before={adena_before}, current={last_value}")
-        time.sleep(0.5)
+        if sleep_interruptible(0.5, "solo"):
+            return last_value
 
 
 class IndependentHasteMacro:
@@ -694,7 +751,8 @@ class IndependentHasteMacro:
         """문제 있는 거래창을 닫고 다른 장사 방향을 찾습니다."""
         print(f"[{self.role}] {label} -> ESC")
         self.key_press(win32con.VK_ESCAPE)
-        time.sleep(0.2)
+        if sleep_interruptible(0.2, self.role):
+            return
         direction = self.choose_shop_direction(
             None,
             exclude_current=True,
@@ -711,7 +769,7 @@ class IndependentHasteMacro:
             print(f"[{self.role}] {label}; no alternate direction")
         self.reset_exchange_window_tracking()
         self.reset_trade_state()
-        time.sleep(0.5)
+        sleep_interruptible(0.5, self.role)
 
     def handle_exchange_window_timeout(self, nickname: str) -> bool:
         """거래창이 오래 열려 있으면 닉네임을 자동 차단 목록에 넣고 방향전환합니다."""
@@ -750,7 +808,7 @@ class IndependentHasteMacro:
         if not sent_low_mp_message:
             self.type_next_low_mp_message()
 
-        time.sleep(0.5)
+        sleep_interruptible(0.5, self.role)
         return True
 
     def recover_from_low_mp_if_needed(self) -> bool:
@@ -764,7 +822,7 @@ class IndependentHasteMacro:
             label="MP recovered",
         )
         if recover_direction is None:
-            time.sleep(0.5)
+            sleep_interruptible(0.5, self.role)
             return False
 
         self.shop_direction = recover_direction
@@ -907,7 +965,7 @@ class IndependentHasteMacro:
                 print(f"[{self.role}] blocked exchange nickname '{nickname}' -> ESC")
                 self.key_press(win32con.VK_ESCAPE)
                 self.reset_exchange_window_tracking()
-                time.sleep(0.5)
+                sleep_interruptible(0.5, self.role)
                 return
 
             self.greeted_nickname = nickname
@@ -920,7 +978,7 @@ class IndependentHasteMacro:
                 print(f"[{self.role}] force shop direction -> {self.shop_direction}")
                 self.img = macro.screenshot(hwnd=macro.lineage1_hwnd)
             self.last_shop_direction_force_time = time.time()
-            time.sleep(0.2)
+            sleep_interruptible(0.2, self.role)
             return
 
         if (
@@ -929,7 +987,7 @@ class IndependentHasteMacro:
         ):
             self.last_return_check_time = time.time()
             self.try_return_to_base_direction(direction_change_nicknames)
-            time.sleep(0.5)
+            sleep_interruptible(0.5, self.role)
             return
 
         if time.time() - self.last_haste_check_time >= haste_check_interval:
@@ -943,10 +1001,10 @@ class IndependentHasteMacro:
                 self.reset_no_front_nickname_tracking()
                 print(f"[{self.role}] direction changed -> {self.shop_direction}")
             if haste_result:
-                time.sleep(0.5)
+                sleep_interruptible(0.5, self.role)
                 return
 
-        time.sleep(0.5)
+        sleep_interruptible(0.5, self.role)
 
     def handle_read_adena_stage(self) -> None:
         """거래 시작 직전 아데나와 픽셀 기준값을 저장하고 F7로 수락 준비를 합니다."""
@@ -963,7 +1021,7 @@ class IndependentHasteMacro:
             self.key_press(win32con.VK_ESCAPE)
             self.reset_exchange_window_tracking()
             self.stage = "wait"
-            time.sleep(0.5)
+            sleep_interruptible(0.5, self.role)
             return
 
         if self.handle_exchange_window_timeout(exchange_nickname):
@@ -996,7 +1054,7 @@ class IndependentHasteMacro:
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
                 macro.acceptExchange()
         self.prev_brightness = brightness
-        time.sleep(0.5)
+        sleep_interruptible(0.5, self.role)
 
     def reset_trade_state(self) -> None:
         """한 번의 거래 흐름이 끝났거나 취소됐을 때 임시 상태를 초기화합니다."""
@@ -1023,7 +1081,7 @@ class IndependentHasteMacro:
         if received <= 0:
             self.type_string("아데나를 받지 못 했습니다. 다시 부탁드리겠습니다.")
             self.last_type_string_time = time.time()
-            time.sleep(1.0)
+            sleep_interruptible(1.0, self.role)
             self.reset_trade_state()
             return
 
@@ -1034,7 +1092,7 @@ class IndependentHasteMacro:
             )
             self.type_string(f"아데나가 부족합니다. 1방 {macro.adena_per_pickup}원입니다.")
             self.last_type_string_time = time.time()
-            time.sleep(1.0)
+            sleep_interruptible(1.0, self.role)
             self.reset_trade_state()
             return
 
@@ -1043,10 +1101,11 @@ class IndependentHasteMacro:
         successful_pickups = 0
         print(f"[{self.role}] pickup remaining={remaining}, available={self.current_available}")
 
-        while remaining > 0:
+        while remaining > 0 and not request_f12_stop(self.role):
             elapsed = time.time() - self.last_pickup_time
             if elapsed < SAME_PICKUP_DELAY_SECONDS:
-                time.sleep(SAME_PICKUP_DELAY_SECONDS - elapsed)
+                if sleep_interruptible(SAME_PICKUP_DELAY_SECONDS - elapsed, self.role):
+                    break
 
             with input_lock():
                 pickup_ok = macro.pickup_lineage1(
@@ -1066,13 +1125,13 @@ class IndependentHasteMacro:
         if successful_pickups > 0:
             self.type_string("감사합니다!")
             self.last_type_string_time = time.time()
-            time.sleep(2.5)
+            sleep_interruptible(2.5, self.role)
 
         self.reset_trade_state()
 
     def run(self) -> None:
         """현재 stage 값에 맞는 처리 함수를 계속 호출합니다."""
-        while True:
+        while not request_f12_stop(self.role):
             if self.stage == "wait":
                 self.handle_wait_stage()
             elif self.stage == "read_adena":
@@ -1150,6 +1209,9 @@ def main() -> int:
     if args.start_proxy:
         print("--start-proxy is only used when launching both server and client.")
 
+    if os.environ.get(CHILD_PROCESS_ENV) != "1":
+        clear_f12_stop_request()
+
     if args.status_interval is None:
         status_interval = read_config_float(config, "status_interval", STATUS_INTERVAL_DEFAULT_SECONDS)
     else:
@@ -1175,7 +1237,7 @@ def main() -> int:
         same_nickname_turn_seconds=same_nickname_turn_seconds,
         no_front_nickname_turn_seconds=no_front_nickname_turn_seconds,
     )
-    print(f"[{args.role}] standalone haste macro started. Press Ctrl+C to stop.")
+    print(f"[{args.role}] standalone haste macro started. Press F12 or Ctrl+C to stop.")
     try:
         app.run()
     except KeyboardInterrupt:

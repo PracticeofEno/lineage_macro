@@ -6,35 +6,35 @@
     "server_mouse_x_y_by_direction": {
         "north": [
             650,
-            350
+            340
         ],
         "northeast": [
             690,
-            342
+            360
         ],
         "east": [
             730,
-            390
+            380
         ],
         "southeast": [
             690,
-            439
+            400
         ],
         "south": [
             650,
-            430
+            420
         ],
         "southwest": [
             610,
-            444
+            400
         ],
         "west": [
             570,
-            390
+            380
         ],
         "northwest": [
             610,
-            342
+            360
         ]
     },
     "client_mouse_x_y": [
@@ -81,98 +81,115 @@
     ],
     "client_numbering_mouse_x_y_by_direction": {
         "north": [
-            650,
-            350
+            1359,
+            314
         ],
         "northeast": [
-            690,
-            342
+            1359,
+            314
         ],
         "east": [
-            730,
-            390
+            1359,
+            314
         ],
         "southeast": [
-            690,
-            439
+            1359,
+            314
         ],
         "south": [
-            650,
-            430
+            1359,
+            314
         ],
         "southwest": [
-            610,
-            444
+            1359,
+            314
         ],
         "west": [
-            570,
-            390
+            1359,
+            314
         ],
         "northwest": [
-            610,
-            342
+            1359,
+            314
         ]
     },
     "haste_check_interval_seconds": 3.0,
-    "low_mp_message_interval_seconds": 10.0,
+    "low_mp_message_interval_seconds": 20.0,
     "low_mp_messages": [
-        "죄송합니다. MP회복중입니다."
+        "엠피회복중"
     ],
     "target_check_failed_message": "{nickname}님 정면에 위치해주시기 바랍니다.",
     "direction_change_nicknames": [
         "질서유지",
         "핑진시",
+        "헤이스트가게",
+        "가게여직원",
         "빨강농장",
         "보라농장",
         "김남진",
         "타쓰지",
-        "방문환영",
+        "헤이왕m",
+        "헤이왕v",
+        "오우거혁띠",
+        "골무스테파니",
+        "자판기3c",
+        "헤이런",
+        "헤이와썹맨",
         "dsafjakdc",
+        "버프여신",
+        "너미뱌",
+        "방문환영",
         "헤이로옷산다",
         "윤짱",
         "헤이로집산다",
         "헤이로밥산다",
-        "버프여신"
+        "코스",
+        "헤이로차산다"
     ],
-    "blocked_turn_directions": [],
+    "blocked_turn_directions": [
+        "north",
+        "east",
+        "south",
+        "west"
+    ],
     "direction_threshold": 6,
     "adena_per_pickup": 150,
-    "adena_three_pickup_price": 450,
+    "adena_three_pickup_price": 400,
     "adena_six_pickup_price": 900,
     "current_direction": "north",
     "low_count_direction": "southeast",
     "high_count_direction": "northwest",
     "turn_north_xy": [
-        650,
-        350
+        654,
+        292
     ],
     "turn_northeast_xy": [
-        690,
-        390
+        816,
+        302
     ],
     "turn_east_xy": [
-        730,
-        390
+        770,
+        394
     ],
     "turn_southeast_xy": [
-        690,
-        440
+        810,
+        544
     ],
     "turn_south_xy": [
-        650,
-        430
+        654,
+        584
     ],
     "turn_southwest_xy": [
-        610,
-        440
+        376,
+        528
     ],
     "turn_west_xy": [
-        570,
-        390
+        336,
+        399
     ],
     "turn_northwest_xy": [
-        610,
-        390
+        429,
+        234
     ],
     "_comment_directions": "north, northeast, east, southeast, south, southwest, west, northwest"
 }

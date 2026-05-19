@@ -36,21 +36,21 @@
         "_comment_directions": "설정에서 사용할 수 있는 방향 이름 목록입니다. north, northeast, east, southeast, south, southwest, west, northwest 중 하나를 씁니다."
     },
     "server_mouse_x_y": [
-        610,
-        355
+        690,
+        415
     ],
     "server_mouse_x_y_by_direction": {
         "north": [
             650,
-            350
+            340
         ],
         "northeast": [
             690,
-            340
+            380
         ],
         "east": [
             730,
-            390
+            400
         ],
         "southeast": [
             690,
@@ -58,11 +58,11 @@
         ],
         "south": [
             650,
-            430
+            440
         ],
         "southwest": [
             610,
-            415
+            420
         ],
         "west": [
             570,
@@ -70,33 +70,33 @@
         ],
         "northwest": [
             610,
-            355
+            350
         ]
     },
     "client_mouse_x_y": [
-        570,
-        340
+        730,
+        435
     ],
     "client_mouse_x_y_by_direction": {
         "north": [
             650,
-            350
+            360
         ],
         "northeast": [
             650,
-            350
+            340
         ],
         "east": [
             730,
-            390
+            400
         ],
         "southeast": [
-            730,
-            420
+            770,
+            440
         ],
         "south": [
             650,
-            430
+            420
         ],
         "southwest": [
             570,
@@ -112,41 +112,41 @@
         ]
     },
     "client_numbering_mouse_x_y": [
-        1359,
-        314
+        730,
+        435
     ],
     "client_numbering_mouse_x_y_by_direction": {
         "north": [
-            1359,
-            314
+            650,
+            360
         ],
         "northeast": [
-            1359,
-            314
+            570,
+            300
         ],
         "east": [
-            1359,
-            314
+            730,
+            400
         ],
         "southeast": [
-            1359,
-            314
+            810,
+            460
         ],
         "south": [
-            1359,
-            314
+            650,
+            420
         ],
         "southwest": [
-            1359,
-            314
+            490,
+            340
         ],
         "west": [
-            1359,
-            314
+            570,
+            390
         ],
         "northwest": [
-            1359,
-            314
+            490,
+            300
         ]
     },
     "haste_check_interval_seconds": 3.0,
@@ -155,7 +155,9 @@
     "same_front_nickname_chat_cooldown_seconds": 15.0,
     "same_front_nickname_client_message": "\"{nickname} 꼬장 알림",
     "low_mp_message_interval_seconds": 60.0,
-    "low_mp_messages": [],
+    "low_mp_messages": [
+        "엠피회복중입니다"
+    ],
     "target_check_failed_message": "{nickname}님 정면에 위치해주시기 바랍니다.",
     "direction_change_nicknames": [
         "타쓰지",
@@ -164,9 +166,16 @@
         "오태식이",
         "dsafjakdc",
         "바란서유지",
-        "발란스",
-        "지브즈",
-        "KOREAN"
+        "sss888",
+        "한국신용",
+        "테이밍법사",
+        "갸쵸매레큐",
+        "넌남자도아녀",
+        "잠원동아가씨",
+        "깐쵸",
+        "김간지",
+        "테라v",
+        "내오"
     ],
     "blocked_turn_directions": [
         "north",
@@ -210,7 +219,7 @@
         390
     ],
     "turn_northwest_xy": [
-        600,
+        610,
         385
     ],
     "_comment_directions": "north, northeast, east, southeast, south, southwest, west, northwest"

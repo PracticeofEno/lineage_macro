@@ -34,7 +34,7 @@ POTION_COOLDOWN = 600
 
 # 개별 창의 헤이스트 가능 횟수가 이 값 이하이면 MP 포션 사용 후보로 봅니다.
 # macro_data.json의 direction_threshold와 다릅니다. 이 값은 "포션 사용 기준"입니다.
-LOW_MP_AVAILABLE_THRESHOLD = 1
+LOW_MP_AVAILABLE_THRESHOLD = 2
 
 # macro_data.json의 haste_check_interval_seconds가 없거나 잘못됐을 때만 쓰는 기본값입니다.
 HASTE_CHECK_DEFAULT_INTERVAL = 3.0

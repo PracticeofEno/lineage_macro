@@ -1,6 +1,6 @@
 {
     "window_title": "server",
-    "hp_percent_threshold": 75.0,
+    "hp_percent_threshold": 70.0,
     "mp_percent_threshold": 10.0,
     "poll_interval_seconds": 0.2,
     "f5_hold_seconds": 1.0,

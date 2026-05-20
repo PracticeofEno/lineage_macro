@@ -3,21 +3,25 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import socket
+import sys
 import threading
 import time
-from ctypes import windll
 from dataclasses import asdict, dataclass
 
 import win32con
-import win32gui
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(BASE_DIR)
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
+
+from macro_common.arduino_tcp import ArduinoProxyClient, ProxyConnectionError
+from macro_common.windowing import RenameableWindowTarget, focus_window, move_window_to_origin
+
 DEFAULT_CONFIG_PATH = os.path.join(BASE_DIR, "meat_macro_config.json")
 POINT_NAMES = ("start", "end1", "end2", "end3", "end4")
 END_POINT_NAMES = POINT_NAMES[1:]
 DIRECTION_POINT_NAMES = tuple(f"dir{idx}" for idx in range(1, 9))
-LINEAGE_WINDOW_TITLE_PREFIX = "Lineage Classic"
 DIRECTION_LABELS = {
     1: "north",
     2: "northeast",
@@ -28,10 +32,6 @@ DIRECTION_LABELS = {
     7: "west",
     8: "northwest",
 }
-
-
-class ProxyConnectionError(RuntimeError):
-    pass
 
 
 @dataclass(slots=True)
@@ -152,215 +152,41 @@ def save_config(path: str, config: MacroConfig) -> None:
         json.dump(raw, f, ensure_ascii=True, indent=2)
 
 
-class ArduinoProxyClient:
-    def __init__(self, host: str, port: int):
-        self.host = host
-        self.port = port
-        self._conn: socket.socket | None = None
-        self._lock = threading.Lock()
-
-    def close(self) -> None:
-        with self._lock:
-            self._close_unlocked()
-
-    def _close_unlocked(self) -> None:
-        if self._conn is None:
-            return
-        try:
-            self._conn.close()
-        except OSError:
-            pass
-        self._conn = None
-
-    def _proxy_error(self, exc: OSError) -> ProxyConnectionError:
-        command = (
-            f"python meat_macro\\meat_macro_proxy.py "
-            f"--serial-port COMx --host {self.host} --port {self.port}"
-        )
-        details = [
-            f"cannot connect to Arduino proxy at {self.host}:{self.port}",
-            "Start the proxy inside the same VM first.",
-            f"Example: {command}",
-            "Replace COMx with the Arduino COM port visible inside the VM.",
-        ]
-        if isinstance(exc, ConnectionRefusedError):
-            details.append("The TCP port is reachable on this machine, but nothing is listening on it.")
-        elif isinstance(exc, TimeoutError):
-            details.append("The TCP connection attempt timed out.")
-        else:
-            details.append(f"Socket error: {exc}")
-        return ProxyConnectionError(" ".join(details))
-
-    def _connect_unlocked(self) -> None:
-        try:
-            conn = socket.create_connection((self.host, self.port), timeout=3)
-        except OSError as exc:
-            raise self._proxy_error(exc) from exc
-        conn.settimeout(3)
-        self._conn = conn
-
-    def probe(self) -> str:
-        try:
-            conn = socket.create_connection((self.host, self.port), timeout=1)
-        except OSError as exc:
-            return f"unreachable ({exc})"
-        try:
-            conn.close()
-        except OSError:
-            pass
-        return "reachable"
-
-    def command(self, cmd: str) -> str:
-        with self._lock:
-            if self._conn is None:
-                self._connect_unlocked()
-
-            try:
-                return self._send_and_read_unlocked(cmd)
-            except ProxyConnectionError:
-                raise
-            except OSError:
-                self._close_unlocked()
-                self._connect_unlocked()
-                return self._send_and_read_unlocked(cmd)
-
-    def _send_and_read_unlocked(self, cmd: str) -> str:
-        assert self._conn is not None
-        self._conn.sendall((cmd + "\n").encode("utf-8"))
-        buf = b""
-        while b"\n" not in buf:
-            chunk = self._conn.recv(256)
-            if not chunk:
-                raise OSError("proxy closed connection")
-            buf += chunk
-        return buf.split(b"\n", 1)[0].decode("utf-8", errors="replace").strip()
-
-    def expect_ok(self, cmd: str) -> None:
-        resp = self.command(cmd)
-        if resp != "OK":
-            raise RuntimeError(f"proxy command failed: {cmd} -> {resp}")
-
-    def init_cursor(self) -> None:
-        self.expect_ok("INIT")
-
-    def move_mouse_abs(self, x: int, y: int) -> None:
-        self.expect_ok(f"MM,{x},{y}")
-
-    def left_down(self) -> None:
-        self.expect_ok("LD")
-
-    def left_up(self) -> None:
-        self.expect_ok("LU")
-
-    def key_press(self, vk: int) -> None:
-        self.expect_ok(f"KP,{vk}")
-
-
-def enum_visible_windows() -> list[tuple[int, str]]:
-    windows: list[tuple[int, str]] = []
-
-    def callback(hwnd: int, _extra) -> None:
-        if not win32gui.IsWindowVisible(hwnd):
-            return
-        title = win32gui.GetWindowText(hwnd)
-        if title:
-            windows.append((hwnd, title))
-
-    win32gui.EnumWindows(callback, None)
-    return windows
-
-
-class WindowResolver:
-    def __init__(self, title_prefix: str, auto_rename_lineage: bool = True):
-        self._title_prefix = title_prefix
-        self._title_prefix_lower = title_prefix.casefold()
-        self._auto_rename_lineage = auto_rename_lineage
-        self._hwnd: int | None = None
-
-    def resolve(self) -> tuple[int, str]:
-        if self._hwnd is not None and win32gui.IsWindow(self._hwnd):
-            title = win32gui.GetWindowText(self._hwnd)
-            if title and title.casefold().startswith(self._title_prefix_lower):
-                return self._hwnd, title
-
-        windows = enum_visible_windows()
-        exact_match = self._find_title_match(windows, exact_only=True)
-        if exact_match is not None:
-            self._hwnd, title = exact_match
-            return self._hwnd, title
-
-        if self._auto_rename_lineage:
-            lineage_match = self._find_lineage_window(windows)
-            if lineage_match is not None:
-                hwnd, old_title = lineage_match
-                win32gui.SetWindowText(hwnd, self._title_prefix)
-                time.sleep(0.05)
-                title = win32gui.GetWindowText(hwnd) or self._title_prefix
-                self._hwnd = hwnd
-                print(f"[window] renamed '{old_title}' -> '{title}'")
-                return self._hwnd, title
-
-        prefix_match = self._find_title_match(windows, exact_only=False)
-        if prefix_match is not None:
-            self._hwnd, title = prefix_match
-            return self._hwnd, title
-
-        raise RuntimeError(f"window not found: {self._title_prefix}")
-
-    def _find_title_match(
-        self,
-        windows: list[tuple[int, str]],
-        exact_only: bool,
-    ) -> tuple[int, str] | None:
-        if exact_only:
-            for hwnd, title in windows:
-                if title.casefold() == self._title_prefix_lower:
-                    return hwnd, title
-            return None
-
-        matches = [
-            (hwnd, title)
-            for hwnd, title in windows
-            if title.casefold().startswith(self._title_prefix_lower)
-        ]
-        if not matches:
-            return None
-        return matches[0]
-
-    @staticmethod
-    def _find_lineage_window(windows: list[tuple[int, str]]) -> tuple[int, str] | None:
-        for hwnd, title in windows:
-            if title.startswith(LINEAGE_WINDOW_TITLE_PREFIX):
-                return hwnd, title
-        return None
-
-
-def focus_window(hwnd: int) -> None:
-    if win32gui.IsIconic(hwnd):
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    windll.user32.keybd_event(0, 0, 0, 0)
-    win32gui.SetForegroundWindow(hwnd)
-    time.sleep(0.05)
-
-
-def move_window_to_origin(hwnd: int) -> tuple[int, int, int, int]:
-    if win32gui.IsIconic(hwnd):
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-    width = right - left
-    height = bottom - top
-    win32gui.MoveWindow(hwnd, 0, 0, width, height, True)
-    time.sleep(0.05)
-    return win32gui.GetWindowRect(hwnd)
+def _format_proxy_connection_error(exc: OSError, host: str, port: int) -> str:
+    command = (
+        "python meat_macro\\meat_macro_proxy.py "
+        f"--serial-port COMx --host {host} --port {port}"
+    )
+    details = [
+        f"cannot connect to Arduino proxy at {host}:{port}",
+        "Start the proxy inside the same VM first.",
+        f"Example: {command}",
+        "Replace COMx with the Arduino COM port visible inside the VM.",
+    ]
+    if isinstance(exc, ConnectionRefusedError):
+        details.append("The TCP port is reachable on this machine, but nothing is listening on it.")
+    elif isinstance(exc, TimeoutError):
+        details.append("The TCP connection attempt timed out.")
+    else:
+        details.append(f"Socket error: {exc}")
+    return " ".join(details)
 
 
 class MeatMacro:
     def __init__(self, config_path: str):
         self._config_path = config_path
         self._config = load_config(config_path)
-        self._proxy = ArduinoProxyClient(self._config.proxy_host, self._config.proxy_port)
+        self._proxy = self._build_proxy(self._config)
         self._loop_thread: threading.Thread | None = None
         self._loop_stop_event = threading.Event()
+
+    @staticmethod
+    def _build_proxy(config: MacroConfig) -> ArduinoProxyClient:
+        return ArduinoProxyClient(
+            config.proxy_host,
+            config.proxy_port,
+            connect_error_factory=_format_proxy_connection_error,
+        )
 
     def close(self) -> None:
         self.stop_loop()
@@ -371,7 +197,7 @@ class MeatMacro:
         self.stop_loop()
         self._config = load_config(self._config_path)
         self._proxy.close()
-        self._proxy = ArduinoProxyClient(self._config.proxy_host, self._config.proxy_port)
+        self._proxy = self._build_proxy(self._config)
         if was_running:
             print("[reload] scheduled loop stopped")
 
@@ -381,7 +207,7 @@ class MeatMacro:
 
     def resolve_target(self, target_name: str) -> tuple[TargetConfig, int, str]:
         target = self._config.targets[target_name]
-        resolver = WindowResolver(target.window_title_prefix)
+        resolver = RenameableWindowTarget(target.window_title_prefix)
         hwnd, title = resolver.resolve()
         return target, hwnd, title
 

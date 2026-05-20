@@ -110,10 +110,13 @@ def _request_f12_stop() -> bool:
 
 def _sleep_interruptible(seconds: float) -> bool:
     deadline = time.time() + max(0.0, seconds)
-    while time.time() < deadline:
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
         if _request_f12_stop():
             return True
-        time.sleep(min(0.05, deadline - time.time()))
+        time.sleep(min(0.05, remaining))
     return False
 
 

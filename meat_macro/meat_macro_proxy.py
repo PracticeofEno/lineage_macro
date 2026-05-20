@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import socket
-import threading
+import os
+import sys
 
-import serial
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(BASE_DIR)
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
+
+from macro_common.serial_proxy import run_serial_proxy
 
 
 def parse_args() -> argparse.Namespace:
@@ -18,62 +23,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def handle_client(conn: socket.socket, addr: tuple, ser: serial.Serial, ser_lock: threading.Lock) -> None:
-    print(f"[proxy] client connected: {addr}")
-    buf = b""
-    try:
-        while True:
-            chunk = conn.recv(256)
-            if not chunk:
-                break
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                cmd = line.decode("utf-8", errors="replace").strip()
-                if not cmd:
-                    continue
-                with ser_lock:
-                    ser.write((cmd + "\n").encode("utf-8"))
-                    resp = ser.readline().decode("utf-8", errors="replace").strip()
-                conn.sendall((resp + "\n").encode("utf-8"))
-    except OSError:
-        pass
-    finally:
-        try:
-            conn.close()
-        except OSError:
-            pass
-        print(f"[proxy] client disconnected: {addr}")
-
-
 def main() -> int:
     args = parse_args()
-    ser = serial.Serial(args.serial_port, args.baud_rate, timeout=1)
-    ser_lock = threading.Lock()
-
-    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((args.host, args.port))
-    server.listen(10)
-
-    print(f"[proxy] serial={args.serial_port} baud={args.baud_rate}")
-    print(f"[proxy] listening on {args.host}:{args.port}")
-
-    try:
-        while True:
-            conn, addr = server.accept()
-            threading.Thread(
-                target=handle_client,
-                args=(conn, addr, ser, ser_lock),
-                daemon=True,
-            ).start()
-    except KeyboardInterrupt:
-        print()
-        print("[proxy] stopped")
-    finally:
-        server.close()
-        ser.close()
-    return 0
+    return run_serial_proxy(args.serial_port, args.baud_rate, args.host, args.port)
 
 
 if __name__ == "__main__":

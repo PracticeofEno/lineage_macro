@@ -16,8 +16,9 @@ from datetime import datetime, timezone, timedelta
 
 import macro
 
-SERVER_HOST = '127.0.0.1'  # ← 서버 IP로 변경
-# SERVER_HOST = '192.168.35.63'
+# SERVER_HOST = '127.0.0.1'  # ← 서버 IP로 변경
+SERVER_HOST = '192.168.35.63' # DELL
+# SERVER_HOST = '192.168.35.55' # ACER
 SERVER_PORT = 9999
 RECONNECT_DELAY = 5  # 재연결 대기 시간(초)
 

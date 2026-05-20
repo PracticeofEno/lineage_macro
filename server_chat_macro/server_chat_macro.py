@@ -3,50 +3,23 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import socket
 import sys
 import threading
-import time
-from ctypes import windll
 from dataclasses import dataclass
-
-import win32con
-import win32gui
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)
 TOOLS_DIR = os.path.join(PROJECT_DIR, "tools")
+if PROJECT_DIR not in sys.path:
+    sys.path.insert(0, PROJECT_DIR)
 if TOOLS_DIR not in sys.path:
     sys.path.insert(0, TOOLS_DIR)
 
-import hangul
+from macro_common.arduino_tcp import ArduinoProxyClient
+from macro_common.chat import ChatTyper
+from macro_common.windowing import WindowTarget, focus_window
 
 DEFAULT_CONFIG_PATH = os.path.join(BASE_DIR, "server_chat_macro.json")
-VK_HANGUL = 0x15
-
-_SHIFT_CHAR_MAP = {
-    "!": "1",
-    "@": "2",
-    "#": "3",
-    "$": "4",
-    "%": "5",
-    "^": "6",
-    "&": "7",
-    "*": "8",
-    "(": "9",
-    ")": "0",
-    "_": "-",
-    "+": "=",
-    "{": "[",
-    "}": "]",
-    "|": "\\",
-    ":": ";",
-    '"': "'",
-    "<": ",",
-    ">": ".",
-    "?": "/",
-    "~": "`",
-}
 
 
 @dataclass(slots=True)
@@ -79,189 +52,6 @@ def load_config(path: str) -> ChatConfig:
         default_interval_seconds=float(raw.get("default_interval_seconds", 10.0)),
         messages=messages,
     )
-
-
-class ArduinoProxyClient:
-    def __init__(self, host: str, port: int):
-        self.host = host
-        self.port = port
-        self._conn: socket.socket | None = None
-        self._lock = threading.Lock()
-
-    def close(self) -> None:
-        with self._lock:
-            self._close_unlocked()
-
-    def _close_unlocked(self) -> None:
-        if self._conn is None:
-            return
-        try:
-            self._conn.close()
-        except OSError:
-            pass
-        self._conn = None
-
-    def _connect_unlocked(self) -> None:
-        conn = socket.create_connection((self.host, self.port), timeout=3)
-        conn.settimeout(3)
-        self._conn = conn
-
-    def _readline_unlocked(self) -> str:
-        if self._conn is None:
-            raise OSError("proxy not connected")
-
-        buf = b""
-        while b"\n" not in buf:
-            chunk = self._conn.recv(256)
-            if not chunk:
-                raise OSError("proxy closed connection")
-            buf += chunk
-        return buf.split(b"\n", 1)[0].decode("utf-8", errors="replace").strip()
-
-    def command(self, cmd: str) -> str:
-        with self._lock:
-            if self._conn is None:
-                self._connect_unlocked()
-
-            try:
-                assert self._conn is not None
-                self._conn.sendall((cmd + "\n").encode("utf-8"))
-                return self._readline_unlocked()
-            except OSError:
-                self._close_unlocked()
-                self._connect_unlocked()
-                assert self._conn is not None
-                self._conn.sendall((cmd + "\n").encode("utf-8"))
-                return self._readline_unlocked()
-
-    def key_down(self, vk: int) -> None:
-        self._expect_ok(f"KD,{vk}")
-
-    def key_up(self, vk: int) -> None:
-        self._expect_ok(f"KU,{vk}")
-
-    def key_press(self, vk: int) -> None:
-        self._expect_ok(f"KP,{vk}")
-
-    def _expect_ok(self, cmd: str) -> None:
-        resp = self.command(cmd)
-        if resp != "OK":
-            raise RuntimeError(f"Arduino proxy error for {cmd}: {resp}")
-
-
-class ServerWindowTarget:
-    def __init__(self, title_prefix: str):
-        self._title_prefix = title_prefix
-        self._title_prefix_lower = title_prefix.casefold()
-        self._hwnd: int | None = None
-
-    def resolve(self) -> tuple[int, str]:
-        if self._hwnd is not None and win32gui.IsWindow(self._hwnd):
-            title = win32gui.GetWindowText(self._hwnd)
-            if title and title.casefold().startswith(self._title_prefix_lower):
-                return self._hwnd, title
-
-        matches: list[tuple[int, str]] = []
-
-        def callback(hwnd: int, _extra) -> None:
-            if not win32gui.IsWindowVisible(hwnd):
-                return
-            title = win32gui.GetWindowText(hwnd)
-            if not title:
-                return
-            if title.casefold().startswith(self._title_prefix_lower):
-                matches.append((hwnd, title))
-
-        win32gui.EnumWindows(callback, None)
-        if not matches:
-            raise RuntimeError(f"'{self._title_prefix}' window not found")
-
-        exact = [entry for entry in matches if entry[1].casefold() == self._title_prefix_lower]
-        hwnd, title = exact[0] if exact else matches[0]
-        self._hwnd = hwnd
-        return hwnd, title
-
-
-def focus_window(hwnd: int) -> None:
-    if win32gui.IsIconic(hwnd):
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    windll.user32.keybd_event(0, 0, 0, 0)
-    win32gui.SetForegroundWindow(hwnd)
-    time.sleep(0.05)
-
-
-class ChatTyper:
-    def __init__(self, proxy: ArduinoProxyClient, starts_in_korean_mode: bool, send_enter: bool):
-        self._proxy = proxy
-        self._starts_in_korean_mode = starts_in_korean_mode
-        self._send_enter = send_enter
-
-    def type_text(self, text: str) -> None:
-        current_korean_mode = self._starts_in_korean_mode
-
-        def set_mode(need_korean: bool) -> None:
-            nonlocal current_korean_mode
-            if current_korean_mode == need_korean:
-                return
-            self._proxy.key_press(VK_HANGUL)
-            current_korean_mode = need_korean
-
-        for ch in text:
-            is_korean = "\uAC00" <= ch <= "\uD7A3"
-
-            if ch == " ":
-                self._proxy.key_press(win32con.VK_SPACE)
-            elif is_korean:
-                set_mode(True)
-                self._type_hangul(ch)
-            elif ch.isalpha():
-                set_mode(False)
-                vk = ord(ch.upper())
-                if ch.isupper():
-                    self._proxy.key_down(win32con.VK_SHIFT)
-                    self._proxy.key_press(vk)
-                    self._proxy.key_up(win32con.VK_SHIFT)
-                else:
-                    self._proxy.key_press(vk)
-            elif ch.isdigit():
-                set_mode(False)
-                self._proxy.key_press(ord(ch))
-            elif ch in _SHIFT_CHAR_MAP:
-                set_mode(False)
-                self._proxy.key_down(win32con.VK_SHIFT)
-                self._proxy.key_press(ord(_SHIFT_CHAR_MAP[ch]))
-                self._proxy.key_up(win32con.VK_SHIFT)
-            else:
-                set_mode(False)
-                self._proxy.key_press(ord(ch))
-
-        if current_korean_mode != self._starts_in_korean_mode:
-            self._proxy.key_press(VK_HANGUL)
-
-        if self._send_enter:
-            self._proxy.key_press(win32con.VK_RETURN)
-
-    def _type_hangul(self, ch: str) -> None:
-        cho, jung, jong = hangul.decompose_hangul(ch)
-        self._type_jamo(cho)
-        self._type_jamo(jung)
-        if jong:
-            self._type_jamo(jong)
-        self._proxy.key_press(win32con.VK_RIGHT)
-
-    def _type_jamo(self, jamo: str) -> None:
-        if jamo in hangul.COMPOUND_JAMO:
-            for part in hangul.COMPOUND_JAMO[jamo]:
-                self._type_jamo(part)
-            return
-
-        key, shift = hangul.JAMO_KEY_MAP[jamo]
-        vk = ord(key)
-        if shift:
-            self._proxy.key_down(win32con.VK_SHIFT)
-        self._proxy.key_press(vk)
-        if shift:
-            self._proxy.key_up(win32con.VK_SHIFT)
 
 
 class MessageRepeater:
@@ -315,7 +105,7 @@ class ServerChatMacro:
         self._config_path = config_path
         self._config = load_config(config_path)
         self._proxy = ArduinoProxyClient(self._config.proxy_host, self._config.proxy_port)
-        self._window_target = ServerWindowTarget(self._config.window_title_prefix)
+        self._window_target = WindowTarget(self._config.window_title_prefix)
         self._typer = ChatTyper(
             self._proxy,
             starts_in_korean_mode=self._config.starts_in_korean_mode,
@@ -338,7 +128,7 @@ class ServerChatMacro:
         self._config = load_config(self._config_path)
         self._proxy.close()
         self._proxy = ArduinoProxyClient(self._config.proxy_host, self._config.proxy_port)
-        self._window_target = ServerWindowTarget(self._config.window_title_prefix)
+        self._window_target = WindowTarget(self._config.window_title_prefix)
         self._typer = ChatTyper(
             self._proxy,
             starts_in_korean_mode=self._config.starts_in_korean_mode,

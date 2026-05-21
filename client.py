@@ -16,10 +16,12 @@ from datetime import datetime, timezone, timedelta
 
 import macro
 
-# SERVER_HOST = '127.0.0.1'  # ← 서버 IP로 변경
-SERVER_HOST = '192.168.35.63' # DELL
+SERVER_HOST = '127.0.0.1'  # ← 서버 IP로 변경
+# SERVER_HOST = '192.168.35.63' # DELL
 # SERVER_HOST = '192.168.35.55' # ACER
 SERVER_PORT = 9999
+CHAT_FOCUS_SETTLE_SECONDS = 0.25
+CHAT_SEND_SETTLE_SECONDS = 0.8
 RECONNECT_DELAY = 5  # 재연결 대기 시간(초)
 
 if len(sys.argv) < 2:
@@ -90,7 +92,13 @@ def _handle_command(msg: dict) -> dict | None:
             return {"status": "ok"}
         logs = [f"채팅 명령 수신 - message={message}"]
         macro.force_set_foreground_window(macro.lineage1_hwnd)
+        time.sleep(CHAT_FOCUS_SETTLE_SECONDS)
         macro.arduino_type_string(message)
+        time.sleep(CHAT_SEND_SETTLE_SECONDS)
+        logs.append(
+            "chat input settled - "
+            f"focus_delay={CHAT_FOCUS_SETTLE_SECONDS}, send_delay={CHAT_SEND_SETTLE_SECONDS}"
+        )
         return {"status": "ok", "logs": logs}
 
     print(f"[client idx({CLIENT_IDX})] 알 수 없는 명령 - msg={msg}")

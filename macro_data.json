@@ -46,7 +46,7 @@
         ],
         "northeast": [
             690,
-            380
+            350
         ],
         "east": [
             730,
@@ -54,7 +54,7 @@
         ],
         "southeast": [
             690,
-            420
+            390
         ],
         "south": [
             650,
@@ -66,7 +66,7 @@
         ],
         "west": [
             570,
-            390
+            400
         ],
         "northwest": [
             610,
@@ -83,8 +83,8 @@
             360
         ],
         "northeast": [
-            610,
-            320
+            730,
+            400
         ],
         "east": [
             730,
@@ -92,15 +92,15 @@
         ],
         "southeast": [
             730,
-            420
+            440
         ],
         "south": [
             650,
             420
         ],
         "southwest": [
-            530,
-            360
+            650,
+            440
         ],
         "west": [
             570,
@@ -160,22 +160,25 @@
     ],
     "target_check_failed_message": "{nickname}님 정면에 위치해주시기 바랍니다.",
     "direction_change_nicknames": [
-        "타쓰지",
-        "김남진",
-        "스파이더마인",
-        "오태식이",
-        "dsafjakdc",
-        "바란서유지",
-        "sss888",
-        "한국신용",
-        "테이밍법사",
-        "갸쵸매레큐",
         "넌남자도아녀",
-        "잠원동아가씨",
-        "깐쵸",
-        "김간지",
-        "테라v",
-        "내오"
+        "도전",
+        "헤이대왕",
+        "헤이런",
+        "이슬이누나v",
+        "벡터맨",
+        "HWL",
+        "시원한",
+        "유진",
+        "헤이스트대가",
+        "하성",
+        "서은주",
+        "GTR1",
+        "지지스카이",
+        "오태식",
+        "5090",
+        "아모르",
+        "가나이",
+        "주주버버"
     ],
     "blocked_turn_directions": [
         "north",
@@ -188,8 +191,8 @@
     "adena_three_pickup_price": 450,
     "adena_six_pickup_price": 900,
     "current_direction": "north",
-    "low_count_direction": "southeast",
-    "high_count_direction": "northwest",
+    "low_count_direction": "northwest",
+    "high_count_direction": "southeast",
     "turn_north_xy": [
         650,
         350

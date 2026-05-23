@@ -133,7 +133,7 @@ def _pickup(char: dict, nickname: str | None):
         print("[macro] 타겟 고정 실패 - pickup 진행")
     utility.arduino_key_press(win32con.VK_F5)
     time.sleep(0.1)
-    utility.arduino_mouse_click_left(x, y)
+    utility.arduino_mouse_click_left()
     time.sleep(0.1)
 
 

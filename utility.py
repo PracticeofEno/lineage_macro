@@ -196,7 +196,7 @@ def arduino_key_down(vk: int):
 def arduino_key_up(vk: int):
     _arduino_send(f'KU,{vk}')
 
-def arduino_mouse_click_left(x: int, y: int):
+def arduino_mouse_click_left():
     _arduino_send('CL')
 
 def arduino_mouse_click_right(x: int, y: int):

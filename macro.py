@@ -103,7 +103,7 @@ def _proxy_connect():
 
 
 # ── Arduino HID 래퍼 ──────────────────────────────────────────────────────────
-# 기존 winapi 함수(key_down / key_up / mouse_click_left 등)와 동일한 인터페이스.
+# 기존 winapi 함수(key_down / key_up 등)와 동일한 인터페이스.
 # Python 쪽은 Windows VK 코드를 그대로 넘기면 Arduino 가 HID 코드로 변환한다.
 
 def _arduino_send(cmd: str) -> str:
@@ -158,7 +158,7 @@ def arduino_mouse_move(x: int, y: int):
     _arduino_send(f'MM,{x},{y}')
 
 
-def arduino_mouse_click_left(x: int, y: int):
+def arduino_mouse_click_left():
     _arduino_send('CL')
 
 
@@ -628,10 +628,6 @@ def screenshot(filename: str = None, hwnd: int = None) -> Image.Image:
     return img
 
 
-def mouse_click_left(x: int, y: int):
-    arduino_mouse_click_left(x, y)
-    time.sleep(0.3)
-
 
 def mouse_click_right(x: int, y: int):
     arduino_mouse_click_right(x, y)
@@ -692,7 +688,7 @@ def pickup_lineage1(target_nickname: str | None = None):
 
     key_press(win32con.VK_F5)
     time.sleep(0.1)
-    mouse_click_left(x, y)
+    arduino_mouse_click_left()
     time.sleep(0.1)
 
 

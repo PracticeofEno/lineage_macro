@@ -32,6 +32,8 @@ _clients_lock = threading.Lock()
 _recv_buffers: dict[socket.socket, bytes] = {}
 _request_id = 0
 _request_id_lock = threading.Lock()
+_last_click_idx_time: dict[int, float] = {}
+_last_click_idx_lock = threading.Lock()
 
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
@@ -171,6 +173,8 @@ def _handle_client(conn: socket.socket, addr: tuple):
     _send_json(conn, {"cmd": "reset_coord"})
     print(f"[server] 좌표 초기화 전송 → {addr}")
 
+    mp_zero_since: float | None = None
+
     try:
         while True:
             with client["lock"]:
@@ -190,6 +194,32 @@ def _handle_client(conn: socket.socket, addr: tuple):
                     client["mp"] = resp.get("mp", 0)
                     client["available"] = int(client["mp"] // 20)
                     # print(f"[server] client {addr} MP: {client['mp']}  available: {client['available']}")
+
+                    if client["mp"] == 0:
+                        if mp_zero_since is None:
+                            mp_zero_since = time.time()
+                        elif time.time() - mp_zero_since >= 300:
+                            do_click = False
+                            with _last_click_idx_lock:
+                                if time.time() - _last_click_idx_time.get(idx, 0) >= 2:
+                                    _last_click_idx_time[idx] = time.time()
+                                    do_click = True
+                            if do_click:
+                                click_req_id = _next_request_id()
+                                print(f"[server] MP 0 5분 지속 → 클릭 명령 전송: {addr}")
+                                if _send_json(conn, {"cmd": "click", "x": 1080, "y": 174, "req_id": click_req_id}):
+                                    ack = _recv_expected_response(
+                                        conn,
+                                        req_id=click_req_id,
+                                        expected_status="ok",
+                                        timeout=ACK_TIMEOUT,
+                                        client=client,
+                                    )
+                                    if ack:
+                                        print(f"[server] 클릭 ack 수신 from {addr}")
+                                        mp_zero_since = time.time()
+                    else:
+                        mp_zero_since = None
             time.sleep(2)
     finally:
         _remove_client(client)

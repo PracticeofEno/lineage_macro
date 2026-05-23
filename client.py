@@ -14,6 +14,8 @@ import threading
 import sys
 from datetime import datetime, timezone, timedelta
 
+import win32api
+
 import macro
 
 SERVER_HOST = '112.185.118.218'  # ← 서버 IP로 변경
@@ -62,6 +64,15 @@ def _handle_command(msg: dict) -> dict | None:
         mp = macro.readMp()
         print(f"[client] ping 수신 → MP: {mp}")
         return {"status": "pong", "mp": mp, "req_id": req_id}
+
+    if cmd == "click":
+        x, y = msg.get("x", 1080), msg.get("y", 174)
+        print(f"[client] 클릭 명령 수신: ({x}, {y})")
+        macro.force_set_foreground_window(macro.lineage1_hwnd)
+        win32api.SetCursorPos((x, y))
+        time.sleep(0.1)
+        macro.arduino_mouse_click_left()
+        return {"status": "ok", "req_id": req_id}
 
     if cmd == "pickup":
         target = msg.get("target")

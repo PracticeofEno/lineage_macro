@@ -752,8 +752,6 @@ def exchange_loop():
                 break
             if _mp1 is not None:
                 macro.mp_1 = _mp1
-            else:
-                macro.press_ctrl_a_for_mp_retry()
 
             with _clients_lock:
                 for e in _clients:

@@ -65,8 +65,7 @@ def _handle_command(msg: dict) -> dict | None:
             running = False
             return {"status": "stopped", "mp": None, "logs": ["Restart clicked - client macro stopped"]}
         if mp is None:
-            macro.press_ctrl_a_for_mp_retry(print_log=False)
-            return {"status": "pong", "mp": mp, "logs": ["MP 읽기 실패 - action=ctrl_a"]}
+            return {"status": "pong", "mp": mp, "logs": ["MP 읽기 실패"]}
         return {"status": "pong", "mp": mp}
 
     if cmd == "pickup":

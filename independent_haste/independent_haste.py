@@ -675,8 +675,6 @@ class IndependentHasteMacro:
         self.img = macro.screenshot(hwnd=macro.lineage1_hwnd)
         mp = macro.readMp(self.img)
         if mp is None:
-            with input_lock():
-                macro.press_ctrl_a_for_mp_retry()
             print(f"[{self.role}] MP read failed; keeping previous MP={self.current_mp}")
             return
 

@@ -355,14 +355,11 @@ high_count_direction = 'northwest'
 exchange_yes_button = (869, 914)  # 교환 수락 Yes 좌표
 exchange_no_button = (917, 912)   # 교환 수락 No 좌표
 _exchange_nickname_xy: tuple[int, int] | None = None
-_last_mp_retry_ctrl_a_time = 0.0
 _RESTART_BUTTON_TEXT_REGION = (1058, 118, 112, 34)
 _RESTART_MENU_CONFIRM_REGION = (1080, 174, 72, 28)
 _RESTART_BUTTON_CLICK_XY = (1115, 135)
 _RESTART_TEXT_BRIGHT_THRESHOLD = 250
 _RESTART_CONFIRM_BRIGHT_THRESHOLD = 120
-_RESTART_CLICK_RETRY_SUPPRESS_SECONDS = 2.0
-_last_restart_button_click_time = 0.0
 TARGET_CHECK_FAILED_MESSAGE_DEFAULT = "{nickname}님 타겟 확인이 안 됩니다. 다시 거래 부탁드립니다."
 
 
@@ -821,24 +818,6 @@ def use_potion():
     _arduino_send(f'KP,{win32con.VK_F8}')
 
 
-def press_ctrl_a_for_mp_retry(cooldown: float = 3.0) -> bool:
-    global _last_mp_retry_ctrl_a_time
-    now = time.time()
-    if now - _last_restart_button_click_time < _RESTART_CLICK_RETRY_SUPPRESS_SECONDS:
-        return False
-    if now - _last_mp_retry_ctrl_a_time < cooldown:
-        return False
-
-    force_set_foreground_window(lineage1_hwnd)
-    arduino_key_down(win32con.VK_CONTROL)
-    arduino_key_press(ord('A'))
-    arduino_key_up(win32con.VK_CONTROL)
-    _last_mp_retry_ctrl_a_time = now
-    print("[macro] MP 인식 실패 -> Ctrl+A")
-    time.sleep(0.1)
-    return True
-
-
 def pickup_lineage1(target_nickname: str | None = None, direction: str | None = None) -> bool:
     """현재 방향 좌표에 있는 대상에게 F5 픽업 동작을 수행합니다."""
     x, y = get_configured_mouse_xy(direction=direction)
@@ -912,7 +891,6 @@ def is_restart_button_visible(img: Image.Image | None = None) -> bool:
 
 
 def click_restart_if_visible(img: Image.Image | None = None, print_log: bool = True) -> bool:
-    global _last_restart_button_click_time
     if img is None:
         img = screenshot()
     if not is_restart_button_visible(img):
@@ -927,7 +905,6 @@ def click_restart_if_visible(img: Image.Image | None = None, print_log: bool = T
     win32api.SetCursorPos((screen_x, screen_y))
     time.sleep(0.05)
     arduino_mouse_click_left(screen_x, screen_y)
-    _last_restart_button_click_time = time.time()
     if print_log:
         print(f"[macro] Restart button detected -> click ({x}, {y})")
     time.sleep(0.5)

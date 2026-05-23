@@ -901,6 +901,10 @@ def click_restart_if_visible(img: Image.Image | None = None, print_log: bool = T
     screen_y = top + y + _RESTART_CLICK_SCREEN_Y_OFFSET
     win32api.SetCursorPos((screen_x, screen_y))
     time.sleep(0.05)
+    arduino_mouse_move_rel(2, 0)
+    time.sleep(0.03)
+    arduino_mouse_move_rel(-2, 0)
+    time.sleep(0.05)
     arduino_mouse_click_left(screen_x, screen_y)
     if print_log:
         print(

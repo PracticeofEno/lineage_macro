@@ -55,10 +55,15 @@ def _recv_json(conn: socket.socket) -> dict | None:
 
 
 def _handle_command(msg: dict) -> dict | None:
+    global running
     cmd = msg.get("cmd")
 
     if cmd == "ping":
-        mp = macro.readMp()
+        try:
+            mp = macro.readMp()
+        except macro.RestartButtonClicked:
+            running = False
+            return {"status": "stopped", "mp": None, "logs": ["Restart clicked - client macro stopped"]}
         if mp is None:
             macro.press_ctrl_a_for_mp_retry(print_log=False)
             return {"status": "pong", "mp": mp, "logs": ["MP 읽기 실패 - action=ctrl_a"]}

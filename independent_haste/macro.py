@@ -366,6 +366,10 @@ _last_restart_button_click_time = 0.0
 TARGET_CHECK_FAILED_MESSAGE_DEFAULT = "{nickname}님 타겟 확인이 안 됩니다. 다시 거래 부탁드립니다."
 
 
+class RestartButtonClicked(RuntimeError):
+    pass
+
+
 def _load_macro_data() -> dict:
     """독립 폴더 안의 macro_data.json을 읽습니다. 루트 설정 파일과 섞이지 않습니다."""
     data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "macro_data.json")
@@ -935,7 +939,7 @@ def readMp(img=None) -> int | None:
     if img is None:
         img = screenshot()
     if click_restart_if_visible(img):
-        return None
+        raise RestartButtonClicked("Restart button clicked")
     for dx in (0, 5, 10):
         cropped = crop(img, 976 + dx, 96, 100, 21)
         text = read_text(cropped, 0, 0, (0xCC, 0xE3, 0xFF))

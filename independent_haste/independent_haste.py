@@ -1132,16 +1132,20 @@ class IndependentHasteMacro:
     def run(self) -> None:
         """현재 stage 값에 맞는 처리 함수를 계속 호출합니다."""
         while not request_f12_stop(self.role):
-            if self.stage == "wait":
-                self.handle_wait_stage()
-            elif self.stage == "read_adena":
-                self.handle_read_adena_stage()
-            elif self.stage == "monitor_brightness":
-                self.handle_monitor_brightness_stage()
-            elif self.stage == "pickup":
-                self.handle_pickup_stage()
-            else:
-                raise RuntimeError(f"unknown stage: {self.stage}")
+            try:
+                if self.stage == "wait":
+                    self.handle_wait_stage()
+                elif self.stage == "read_adena":
+                    self.handle_read_adena_stage()
+                elif self.stage == "monitor_brightness":
+                    self.handle_monitor_brightness_stage()
+                elif self.stage == "pickup":
+                    self.handle_pickup_stage()
+                else:
+                    raise RuntimeError(f"unknown stage: {self.stage}")
+            except macro.RestartButtonClicked:
+                print(f"[{self.role}] Restart clicked - independent macro stopped")
+                break
 
 
 def parse_args() -> argparse.Namespace:

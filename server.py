@@ -744,7 +744,12 @@ def exchange_loop():
                 direction_synced = True
 
             img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-            _mp1 = macro.readMp(img)
+            try:
+                _mp1 = macro.readMp(img)
+            except macro.RestartButtonClicked:
+                running = False
+                print("[server] Restart clicked - exchange macro stopped")
+                break
             if _mp1 is not None:
                 macro.mp_1 = _mp1
             else:

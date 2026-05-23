@@ -353,6 +353,7 @@ _exchange_nickname_xy: tuple[int, int] | None = None
 _RESTART_BUTTON_TEXT_REGION = (1058, 118, 112, 34)
 _RESTART_MENU_CONFIRM_REGION = (1080, 174, 72, 28)
 _RESTART_BUTTON_CLICK_XY = (1115, 135)
+_RESTART_CLICK_SCREEN_Y_OFFSET = 50
 _RESTART_TEXT_BRIGHT_THRESHOLD = 250
 _RESTART_CONFIRM_BRIGHT_THRESHOLD = 120
 TARGET_CHECK_FAILED_MESSAGE_DEFAULT = "{nickname}님 타겟 확인이 안 됩니다. 다시 거래 부탁드립니다."
@@ -897,12 +898,15 @@ def click_restart_if_visible(img: Image.Image | None = None, print_log: bool = T
     left, top, _right, _bottom = win32gui.GetWindowRect(hwnd)
     x, y = _RESTART_BUTTON_CLICK_XY
     screen_x = left + x
-    screen_y = top + y
+    screen_y = top + y + _RESTART_CLICK_SCREEN_Y_OFFSET
     win32api.SetCursorPos((screen_x, screen_y))
     time.sleep(0.05)
     arduino_mouse_click_left(screen_x, screen_y)
     if print_log:
-        print(f"[macro] Restart button detected -> click ({x}, {y})")
+        print(
+            f"[macro] Restart button detected -> click ({x}, {y}) "
+            f"screen_y_offset={_RESTART_CLICK_SCREEN_Y_OFFSET}"
+        )
     time.sleep(0.5)
     return True
 

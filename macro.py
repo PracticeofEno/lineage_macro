@@ -351,6 +351,13 @@ exchange_yes_button = (869, 914)  # 교환 수락 Yes 좌표
 exchange_no_button = (917, 912)   # 교환 수락 No 좌표
 _exchange_nickname_xy: tuple[int, int] | None = None
 _last_mp_retry_ctrl_a_time = 0.0
+_RESTART_BUTTON_TEXT_REGION = (1058, 118, 112, 34)
+_RESTART_MENU_CONFIRM_REGION = (1080, 174, 72, 28)
+_RESTART_BUTTON_CLICK_XY = (1115, 135)
+_RESTART_TEXT_BRIGHT_THRESHOLD = 250
+_RESTART_CONFIRM_BRIGHT_THRESHOLD = 120
+_RESTART_CLICK_RETRY_SUPPRESS_SECONDS = 2.0
+_last_restart_button_click_time = 0.0
 TARGET_CHECK_FAILED_MESSAGE_DEFAULT = "{nickname}님 타겟 확인이 안 됩니다. 다시 거래 부탁드립니다."
 
 
@@ -797,6 +804,8 @@ def use_potion():
 def press_ctrl_a_for_mp_retry(cooldown: float = 3.0, print_log: bool = True) -> bool:
     global _last_mp_retry_ctrl_a_time
     now = time.time()
+    if now - _last_restart_button_click_time < _RESTART_CLICK_RETRY_SUPPRESS_SECONDS:
+        return False
     if now - _last_mp_retry_ctrl_a_time < cooldown:
         return False
 
@@ -873,9 +882,56 @@ def get_brightness(image: Image.Image) -> float:
     return float(arr.mean())
 
 
+def _count_bright_pixels(image: Image.Image, region: tuple[int, int, int, int], threshold: int = 235) -> int:
+    x, y, width, height = region
+    if x < 0 or y < 0 or x + width > image.width or y + height > image.height:
+        return 0
+
+    arr = np.array(crop(image.convert("RGB"), x, y, width, height))
+    mask = (arr[:, :, 0] >= threshold) & (arr[:, :, 1] >= threshold) & (arr[:, :, 2] >= threshold)
+    return int(mask.sum())
+
+
+def is_restart_button_visible(img: Image.Image | None = None) -> bool:
+    if img is None:
+        img = screenshot()
+
+    restart_bright = _count_bright_pixels(img, _RESTART_BUTTON_TEXT_REGION)
+    confirm_bright = _count_bright_pixels(img, _RESTART_MENU_CONFIRM_REGION)
+    return (
+        restart_bright >= _RESTART_TEXT_BRIGHT_THRESHOLD
+        and confirm_bright >= _RESTART_CONFIRM_BRIGHT_THRESHOLD
+    )
+
+
+def click_restart_if_visible(img: Image.Image | None = None, print_log: bool = True) -> bool:
+    global _last_restart_button_click_time
+    if img is None:
+        img = screenshot()
+    if not is_restart_button_visible(img):
+        return False
+
+    hwnd = get_hwnd()
+    force_set_foreground_window(hwnd)
+    left, top, _right, _bottom = win32gui.GetWindowRect(hwnd)
+    x, y = _RESTART_BUTTON_CLICK_XY
+    screen_x = left + x
+    screen_y = top + y
+    win32api.SetCursorPos((screen_x, screen_y))
+    time.sleep(0.05)
+    arduino_mouse_click_left(screen_x, screen_y)
+    _last_restart_button_click_time = time.time()
+    if print_log:
+        print(f"[macro] Restart button detected -> click ({x}, {y})")
+    time.sleep(0.5)
+    return True
+
+
 def readMp(img=None) -> int | None:
     if img is None:
         img = screenshot()
+    if click_restart_if_visible(img):
+        return None
     for dx in (0, 5, 10):
         cropped = crop(img, 976 + dx, 96, 100, 21)
         text = read_text(cropped, 0, 0, (0xCC, 0xE3, 0xFF))

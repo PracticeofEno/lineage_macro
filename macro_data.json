@@ -83,8 +83,7 @@
             360
         ],
         "northeast": [
-            730,
-            400
+            650, 340
         ],
         "east": [
             730,
@@ -99,16 +98,16 @@
             420
         ],
         "southwest": [
-            650,
-            440
+            570,
+            380
         ],
         "west": [
             570,
-            390
+            400
         ],
         "northwest": [
-            530,
-            320
+            570,
+            340
         ]
     },
     "client_numbering_mouse_x_y": [
@@ -153,7 +152,7 @@
     "same_front_nickname_chat_seconds": 60.0,
     "same_front_nickname_chat_client_idx": 1,
     "same_front_nickname_chat_cooldown_seconds": 15.0,
-    "same_front_nickname_client_message": "\"{nickname} 꼬장 알림",
+    "same_front_nickname_client_message": "\"{nickname} .",
     "low_mp_message_interval_seconds": 60.0,
     "low_mp_messages": [
         "엠피회복중입니다"
@@ -161,24 +160,7 @@
     "target_check_failed_message": "{nickname}님 정면에 위치해주시기 바랍니다.",
     "direction_change_nicknames": [
         "넌남자도아녀",
-        "도전",
-        "헤이대왕",
-        "헤이런",
-        "이슬이누나v",
-        "벡터맨",
-        "HWL",
-        "시원한",
-        "유진",
-        "헤이스트대가",
-        "하성",
-        "서은주",
-        "GTR1",
-        "지지스카이",
-        "오태식",
-        "5090",
-        "아모르",
-        "가나이",
-        "주주버버"
+        "헤이스트대가"
     ],
     "blocked_turn_directions": [
         "north",
@@ -191,8 +173,8 @@
     "adena_three_pickup_price": 450,
     "adena_six_pickup_price": 900,
     "current_direction": "north",
-    "low_count_direction": "northwest",
-    "high_count_direction": "southeast",
+    "low_count_direction": "southeast",
+    "high_count_direction": "northwest",
     "turn_north_xy": [
         650,
         350

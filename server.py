@@ -85,6 +85,8 @@ TURN_DIRECTIONS = (
 _clients: list[dict] = []
 _clients_lock = threading.Lock()
 _macro_data_write_lock = threading.Lock()
+_restart_shutdown_lock = threading.Lock()
+_restart_shutdown_started = False
 
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
@@ -251,6 +253,83 @@ def _remove_client(client: dict):
     print(f"[server] 클라이언트 제거됨: {client['addr']}")
 
 
+def _send_restart(client: dict) -> bool:
+    """특정 클라이언트에게 Restart 클릭을 시도하게 하고 ack를 기다린다."""
+    if "conn" not in client:
+        return False
+
+    conn = client["conn"]
+    addr = client["addr"]
+    with client["lock"]:
+        print(f"[server] Restart 명령 전송 - client_idx={client.get('idx')}, addr={addr}")
+        if not _send_json(conn, {"cmd": "restart"}):
+            _remove_client(client)
+            return False
+
+        conn.settimeout(ACK_TIMEOUT)
+        resp = _recv_json(conn)
+        conn.settimeout(None)
+
+        if resp is None:
+            print(f"[server] Restart 응답 실패 - client_idx={client.get('idx')}, addr={addr}")
+            _remove_client(client)
+            return False
+
+        for line in resp.get("logs", []):
+            print(f"[client idx({client.get('idx')})] {line}")
+
+        if resp.get("status") == "stopped":
+            print(
+                f"[server] Restart 응답 수신 - client_idx={client.get('idx')}, "
+                f"clicked={resp.get('clicked')}, addr={addr}"
+            )
+            return True
+
+        print(f"[server] Restart 응답 오류 - client_idx={client.get('idx')}, resp={resp}")
+        return False
+
+
+def _request_restart_shutdown(
+    source: str,
+    *,
+    skip_client: dict | None = None,
+    click_server: bool = False,
+) -> None:
+    """Restart 감지 후 서버/클라이언트 클릭을 한 번만 조율하고 exchange를 멈춘다."""
+    global running, _restart_shutdown_started
+
+    with _restart_shutdown_lock:
+        if _restart_shutdown_started:
+            return
+        _restart_shutdown_started = True
+
+    print(f"[server] Restart 감지 - source={source}")
+
+    if click_server:
+        try:
+            clicked = macro.click_restart_if_visible()
+            print(f"[server] Restart 서버 클릭 시도 - clicked={clicked}")
+        except Exception as exc:
+            print(f"[server] Restart 서버 클릭 실패 - error={exc}")
+
+    with _clients_lock:
+        clients_snapshot = [
+            e for e in _clients
+            if "conn" in e and e is not skip_client
+        ]
+
+    if clients_snapshot:
+        print(f"[server] Restart 클라이언트 클릭 요청 - count={len(clients_snapshot)}")
+    else:
+        print("[server] Restart 클라이언트 클릭 요청 스킵 - reason=no_connected_client")
+
+    for client in clients_snapshot:
+        _send_restart(client)
+
+    running = False
+    print("[server] Restart 처리 완료 - exchange macro stopped")
+
+
 def _handle_client(conn: socket.socket, addr: tuple):
     # 첫 메시지로 클라이언트가 보낸 idx 수신
     conn.settimeout(10)
@@ -271,6 +350,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
         _clients.append(client)
     try:
         while True:
+            restart_detected = False
             with client["lock"]:
                 if not _send_json(conn, {"cmd": "ping"}):
                     break
@@ -281,12 +361,21 @@ def _handle_client(conn: socket.socket, addr: tuple):
                     break
                 for line in resp.get("logs", []):
                     print(f"[client idx({client.get('idx')})] {line}")
-                if resp.get("status") == "pong":
+                if resp.get("status") == "stopped":
+                    restart_detected = True
+                elif resp.get("status") == "pong":
                     mp = resp.get("mp")
                     if mp is not None:
                         client["mp"] = int(mp)
                         client["available"] = int(client["mp"] // 20)
                     # print(f"[server] client {addr} MP: {client['mp']}  available: {client['available']}")
+            if restart_detected:
+                _request_restart_shutdown(
+                    f"client_idx={client.get('idx')}",
+                    skip_client=client,
+                    click_server=True,
+                )
+                break
             if _sleep_interruptible(2):
                 break
     finally:
@@ -747,8 +836,7 @@ def exchange_loop():
             try:
                 _mp1 = macro.readMp(img)
             except macro.RestartButtonClicked:
-                running = False
-                print("[server] Restart clicked - exchange macro stopped")
+                _request_restart_shutdown("server", click_server=False)
                 break
             if _mp1 is not None:
                 macro.mp_1 = _mp1
@@ -1213,6 +1301,7 @@ if __name__ == "__main__":
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
                 running = True
                 _f12_stop_reported = False
+                _restart_shutdown_started = False
                 exchange_thread = threading.Thread(target=exchange_loop, daemon=True)
                 exchange_thread.start()
         if cmd == "2":

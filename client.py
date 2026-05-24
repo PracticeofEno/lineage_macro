@@ -90,6 +90,16 @@ def _handle_command(msg: dict) -> dict | None:
         macro.use_potion()
         return {"status": "ok", "logs": logs}
 
+    if cmd == "restart":
+        logs = ["Restart 명령 수신"]
+        clicked = macro.click_restart_if_visible()
+        running = False
+        if clicked:
+            logs.append("Restart clicked - client macro stopped")
+        else:
+            logs.append("Restart not visible - client macro stopped")
+        return {"status": "stopped", "clicked": clicked, "logs": logs}
+
     if cmd == "chat":
         message = str(msg.get("message", "")).strip()
         if not message:

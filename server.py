@@ -198,7 +198,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
                     if client["mp"] == 0:
                         if mp_zero_since is None:
                             mp_zero_since = time.time()
-                        elif time.time() - mp_zero_since >= 300:
+                        elif time.time() - mp_zero_since >= 60:
                             do_click = False
                             with _last_click_idx_lock:
                                 if time.time() - _last_click_idx_time.get(idx, 0) >= 2:

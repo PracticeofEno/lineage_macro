@@ -353,6 +353,8 @@ def exchange_loop():
                         time.sleep(1)
                         macro.arduino_mouse_click_left()
                         macro.arduino_mouse_click_left()
+                        time.sleep(2)
+                        macro._DIRECTION_FUNCS(macro.high_count_direction)
                         _server_mp_zero_since = time.time()
 
             with _clients_lock:

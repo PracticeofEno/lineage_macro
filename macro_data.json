@@ -83,7 +83,8 @@
             360
         ],
         "northeast": [
-            650, 340
+            650,
+            340
         ],
         "east": [
             730,
@@ -160,7 +161,10 @@
     "target_check_failed_message": "{nickname}님 정면에 위치해주시기 바랍니다.",
     "direction_change_nicknames": [
         "넌남자도아녀",
-        "헤이스트대가"
+        "요정지기",
+        "xcas",
+        "용용기",
+        "너미뱌"
     ],
     "blocked_turn_directions": [
         "north",

@@ -356,6 +356,13 @@ _RESTART_BUTTON_CLICK_XY = (1115, 135)
 _RESTART_CLICK_SCREEN_Y_OFFSET = 25
 _RESTART_TEXT_BRIGHT_THRESHOLD = 250
 _RESTART_CONFIRM_BRIGHT_THRESHOLD = 120
+_RESTART_CLICK_MIN_INTERVAL_SECONDS = 1.0
+_RESTART_WATCH_INTERVAL_SECONDS = 0.5
+_restart_click_lock = _threading.Lock()
+_restart_watch_lock = _threading.Lock()
+_restart_watch_thread: _threading.Thread | None = None
+_restart_watch_stop: _threading.Event | None = None
+_last_restart_click_time = 0.0
 TARGET_CHECK_FAILED_MESSAGE_DEFAULT = "{nickname}님 타겟 확인이 안 됩니다. 다시 거래 부탁드립니다."
 
 
@@ -888,10 +895,18 @@ def is_restart_button_visible(img: Image.Image | None = None) -> bool:
 
 
 def click_restart_if_visible(img: Image.Image | None = None, print_log: bool = True) -> bool:
+    global _last_restart_click_time
+
     if img is None:
         img = screenshot()
     if not is_restart_button_visible(img):
         return False
+
+    now = time.time()
+    with _restart_click_lock:
+        if now - _last_restart_click_time < _RESTART_CLICK_MIN_INTERVAL_SECONDS:
+            return False
+        _last_restart_click_time = now
 
     hwnd = get_hwnd()
     force_set_foreground_window(hwnd)
@@ -913,6 +928,44 @@ def click_restart_if_visible(img: Image.Image | None = None, print_log: bool = T
         )
     time.sleep(0.5)
     return True
+
+
+def start_restart_watcher(
+    on_click=None,
+    interval: float = _RESTART_WATCH_INTERVAL_SECONDS,
+    print_log: bool = True,
+) -> None:
+    global _restart_watch_thread, _restart_watch_stop
+
+    with _restart_watch_lock:
+        if _restart_watch_thread is not None and _restart_watch_thread.is_alive():
+            return
+
+        stop_event = _threading.Event()
+        _restart_watch_stop = stop_event
+
+        def _watch() -> None:
+            while not stop_event.is_set():
+                try:
+                    if click_restart_if_visible(print_log=print_log) and on_click is not None:
+                        on_click()
+                except Exception as exc:
+                    if print_log:
+                        print(f"[macro] Restart watcher error - error={exc}")
+                stop_event.wait(max(0.1, interval))
+
+        _restart_watch_thread = _threading.Thread(
+            target=_watch,
+            name="restart-watcher",
+            daemon=True,
+        )
+        _restart_watch_thread.start()
+
+
+def stop_restart_watcher() -> None:
+    with _restart_watch_lock:
+        if _restart_watch_stop is not None:
+            _restart_watch_stop.set()
 
 
 def readMp(img=None) -> int | None:

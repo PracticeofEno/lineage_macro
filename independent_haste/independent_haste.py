@@ -569,6 +569,7 @@ class IndependentHasteMacro:
         self.exchange_window_nickname: str | None = None
         self.exchange_window_since = 0.0
         self.img = None
+        self.restart_stop_requested = False
 
     def load_haste_config(self, direction: str) -> tuple[tuple[int, int], float, set[str]]:
         """현재 방향 기준 확인 좌표와 차단 닉네임 목록을 최신 설정에서 읽습니다."""
@@ -1129,7 +1130,7 @@ class IndependentHasteMacro:
 
     def run(self) -> None:
         """현재 stage 값에 맞는 처리 함수를 계속 호출합니다."""
-        while not request_f12_stop(self.role):
+        while not self.restart_stop_requested and not request_f12_stop(self.role):
             try:
                 if self.stage == "wait":
                     self.handle_wait_stage()
@@ -1142,6 +1143,7 @@ class IndependentHasteMacro:
                 else:
                     raise RuntimeError(f"unknown stage: {self.stage}")
             except macro.RestartButtonClicked:
+                self.restart_stop_requested = True
                 print(f"[{self.role}] Restart clicked - independent macro stopped")
                 break
 
@@ -1239,6 +1241,16 @@ def main() -> int:
         same_nickname_turn_seconds=same_nickname_turn_seconds,
         no_front_nickname_turn_seconds=no_front_nickname_turn_seconds,
     )
+    restart_watcher_reported = False
+
+    def _handle_restart_watcher_click() -> None:
+        nonlocal restart_watcher_reported
+        app.restart_stop_requested = True
+        if not restart_watcher_reported:
+            print(f"[{args.role}] Restart watcher clicked - independent macro stopped")
+            restart_watcher_reported = True
+
+    macro.start_restart_watcher(on_click=_handle_restart_watcher_click)
     print(f"[{args.role}] standalone haste macro started. Press F12 or Ctrl+C to stop.")
     try:
         app.run()

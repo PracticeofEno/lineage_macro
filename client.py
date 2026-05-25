@@ -31,6 +31,15 @@ CLIENT_IDX = int(sys.argv[1])
 
 running = False
 _conn_thread = None
+_restart_watcher_stop_reported = False
+
+
+def _handle_restart_watcher_click() -> None:
+    global running, _restart_watcher_stop_reported
+    running = False
+    if not _restart_watcher_stop_reported:
+        print(f"[client idx({CLIENT_IDX})] Restart watcher clicked - client macro stopped")
+        _restart_watcher_stop_reported = True
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -55,7 +64,7 @@ def _recv_json(conn: socket.socket) -> dict | None:
 
 
 def _handle_command(msg: dict) -> dict | None:
-    global running
+    global running, _restart_watcher_stop_reported
     cmd = msg.get("cmd")
 
     if cmd == "ping":
@@ -63,6 +72,7 @@ def _handle_command(msg: dict) -> dict | None:
             mp = macro.readMp()
         except macro.RestartButtonClicked:
             running = False
+            _restart_watcher_stop_reported = True
             return {"status": "stopped", "mp": None, "logs": ["Restart clicked - client macro stopped"]}
         if mp is None:
             return {"status": "pong", "mp": mp, "logs": ["MP 읽기 실패"]}
@@ -94,6 +104,7 @@ def _handle_command(msg: dict) -> dict | None:
         logs = ["Restart 명령 수신"]
         clicked = macro.click_restart_if_visible()
         running = False
+        _restart_watcher_stop_reported = True
         if clicked:
             logs.append("Restart clicked - client macro stopped")
         else:
@@ -159,6 +170,7 @@ def _connect_loop():
 
 if __name__ == "__main__":
     macro.init_setting("client")
+    macro.start_restart_watcher(on_click=_handle_restart_watcher_click)
 
     print("명령어: 1=연결 시작, 2=연결 중지, q=종료")
     while True:
@@ -169,6 +181,7 @@ if __name__ == "__main__":
         elif cmd == "1":
             if _conn_thread is None or not _conn_thread.is_alive():
                 running = True
+                _restart_watcher_stop_reported = False
                 _conn_thread = threading.Thread(target=_connect_loop, daemon=True)
                 _conn_thread.start()
                 print(f"[client idx({CLIENT_IDX})] 연결 시작")

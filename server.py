@@ -34,7 +34,7 @@ POTION_COOLDOWN = 600
 
 # 개별 창의 헤이스트 가능 횟수가 이 값 이하이면 MP 포션 사용 후보로 봅니다.
 # macro_data.json의 direction_threshold와 다릅니다. 이 값은 "포션 사용 기준"입니다.
-LOW_MP_AVAILABLE_THRESHOLD = 2
+LOW_MP_AVAILABLE_THRESHOLD = 1
 
 # macro_data.json의 haste_check_interval_seconds가 없거나 잘못됐을 때만 쓰는 기본값입니다.
 HASTE_CHECK_DEFAULT_INTERVAL = 3.0
@@ -328,6 +328,10 @@ def _request_restart_shutdown(
 
     running = False
     print("[server] Restart 처리 완료 - exchange macro stopped")
+
+
+def _handle_restart_watcher_click() -> None:
+    _request_restart_shutdown("watcher", click_server=False)
 
 
 def _handle_client(conn: socket.socket, addr: tuple):
@@ -1272,6 +1276,7 @@ def exchange_loop():
 # ── 진입점 ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     macro.init_setting("server")
+    macro.start_restart_watcher(on_click=_handle_restart_watcher_click)
 
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

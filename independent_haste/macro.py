@@ -99,6 +99,7 @@ _PROXY_HOST = '127.0.0.1'
 _PROXY_PORT = 9998
 _proxy_conn: _socket.socket | None = None
 _proxy_lock = _threading.Lock()
+_screenshot_lock = _threading.Lock()
 
 
 def _proxy_connect():
@@ -749,29 +750,63 @@ def move_window(x: int, y: int):
 
 def screenshot(filename: str = None, hwnd: int = None) -> Image.Image:
     """Lineage 창을 캡처합니다. 모든 OCR/픽셀/밝기 판단의 기준 이미지입니다."""
-    if hwnd is None:
-        hwnd = get_hwnd()
-    rect = win32gui.GetWindowRect(hwnd)
-    w = int((rect[2] - rect[0]))
-    h = int((rect[3] - rect[1]))
+    with _screenshot_lock:
+        if hwnd is None:
+            hwnd = get_hwnd()
+        if not win32gui.IsWindow(hwnd):
+            raise RuntimeError(f"invalid window handle for screenshot: {hwnd}")
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            time.sleep(0.05)
 
-    hwnd_dc = win32gui.GetWindowDC(hwnd)
-    mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
-    save_dc = mfc_dc.CreateCompatibleDC()
-    bitmap = win32ui.CreateBitmap()
-    bitmap.CreateCompatibleBitmap(mfc_dc, w, h)
-    save_dc.SelectObject(bitmap)
+        rect = win32gui.GetWindowRect(hwnd)
+        w = int((rect[2] - rect[0]))
+        h = int((rect[3] - rect[1]))
+        if w <= 0 or h <= 0:
+            raise RuntimeError(f"invalid window size for screenshot: hwnd={hwnd}, size={w}x{h}")
 
-    windll.user32.PrintWindow(hwnd, save_dc.GetSafeHdc(), 3)
+        hwnd_dc = None
+        mfc_dc = None
+        save_dc = None
+        bitmap = None
+        try:
+            hwnd_dc = win32gui.GetWindowDC(hwnd)
+            if not hwnd_dc:
+                raise RuntimeError(f"GetWindowDC failed: hwnd={hwnd}")
+            mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
+            save_dc = mfc_dc.CreateCompatibleDC()
+            bitmap = win32ui.CreateBitmap()
+            bitmap.CreateCompatibleBitmap(mfc_dc, w, h)
+            save_dc.SelectObject(bitmap)
 
-    bmpinfo = bitmap.GetInfo()
-    bmpstr = bitmap.GetBitmapBits(True)
-    img = Image.frombuffer("RGB", (bmpinfo["bmWidth"], bmpinfo["bmHeight"]), bmpstr, "raw", "BGRX", 0, 1)
+            windll.user32.PrintWindow(hwnd, save_dc.GetSafeHdc(), 3)
 
-    win32gui.DeleteObject(bitmap.GetHandle())
-    save_dc.DeleteDC()
-    mfc_dc.DeleteDC()
-    win32gui.ReleaseDC(hwnd, hwnd_dc)
+            bmpinfo = bitmap.GetInfo()
+            bmpstr = bitmap.GetBitmapBits(True)
+            img = Image.frombuffer("RGB", (bmpinfo["bmWidth"], bmpinfo["bmHeight"]), bmpstr, "raw", "BGRX", 0, 1)
+        finally:
+            if bitmap is not None:
+                try:
+                    handle = bitmap.GetHandle()
+                    if handle:
+                        win32gui.DeleteObject(handle)
+                except Exception:
+                    pass
+            if save_dc is not None:
+                try:
+                    save_dc.DeleteDC()
+                except Exception:
+                    pass
+            if mfc_dc is not None:
+                try:
+                    mfc_dc.DeleteDC()
+                except Exception:
+                    pass
+            if hwnd_dc is not None:
+                try:
+                    win32gui.ReleaseDC(hwnd, hwnd_dc)
+                except Exception:
+                    pass
 
     img = img.crop((0, 0, img.width - 16, img.height - 41))
 

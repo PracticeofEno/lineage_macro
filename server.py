@@ -322,6 +322,7 @@ def exchange_loop():
     clients_snapshot = []
     _last_target_text = ''
     _last_target_first_seen = 0.0
+    _server_mp_zero_since: float | None = None
     while running:
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
@@ -329,6 +330,30 @@ def exchange_loop():
             _mp1 = macro.readMp(img)
             if _mp1 != 0:
                 macro.mp_1 = _mp1
+                _server_mp_zero_since = None
+            else:
+                if _server_mp_zero_since is None:
+                    _server_mp_zero_since = time.time()
+                elif time.time() - _server_mp_zero_since >= 60:
+                    do_click = False
+                    with _last_click_idx_lock:
+                        if time.time() - _last_click_idx_time.get(0, 0) >= 10:
+                            _last_click_idx_time[0] = time.time()
+                            do_click = True
+                    if do_click:
+                        print("[server] 서버 MP 0 1분 지속 → 자체 클릭 실행")
+                        macro.force_set_foreground_window(macro.lineage1_hwnd)
+                        win32api.SetCursorPos((1080, 174))
+                        time.sleep(1)
+                        macro.arduino_mouse_click_left()
+                        time.sleep(2)
+                        macro.arduino_key_press(win32con.VK_F10)
+                        time.sleep(1)
+                        win32api.SetCursorPos((105, 85))
+                        time.sleep(1)
+                        macro.arduino_mouse_click_left()
+                        macro.arduino_mouse_click_left()
+                        _server_mp_zero_since = time.time()
 
             with _clients_lock:
                 for e in _clients:
@@ -578,9 +603,9 @@ if __name__ == "__main__":
         if cmd == "2":
             running = False
         if cmd == "3":
-            with _clients_lock:
-                target = next((c for c in _clients if c.get("idx") == 1 and "conn" in c), None)
-            if target:
-                _send_pickup(target)
-            else:
-                print("[server] idx=1 클라이언트 없음")
+            macro.force_set_foreground_window(macro.lineage1_hwnd)
+            macro.arduino_key_press(win32con.VK_F10)
+            win32api.SetCursorPos((105, 85))
+            time.sleep(1)
+            macro.arduino_mouse_click_left()
+            macro.arduino_mouse_click_left()

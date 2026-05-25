@@ -12,6 +12,7 @@ import json
 import time
 import threading
 import sys
+import win32con
 from datetime import datetime, timezone, timedelta
 
 import win32api
@@ -69,8 +70,15 @@ def _handle_command(msg: dict) -> dict | None:
         x, y = msg.get("x", 1080), msg.get("y", 174)
         print(f"[client] 클릭 명령 수신: ({x}, {y})")
         macro.force_set_foreground_window(macro.lineage1_hwnd)
-        win32api.SetCursorPos((x, y))
-        time.sleep(0.1)
+        win32api.SetCursorPos((1080, 174))
+        time.sleep(1)
+        macro.arduino_mouse_click_left()
+        time.sleep(2)
+        macro.arduino_key_press(win32con.VK_F10)
+        time.sleep(1)
+        win32api.SetCursorPos((105, 85))
+        time.sleep(1)
+        macro.arduino_mouse_click_left()
         macro.arduino_mouse_click_left()
         return {"status": "ok", "req_id": req_id}
 

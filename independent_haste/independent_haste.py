@@ -46,6 +46,9 @@ SHOP_DIRECTION_FORCE_INTERVAL_SECONDS = 15.0
 # 교환창 슬롯 영역 평균 밝기가 이 값보다 크면 교환 OK 후보로 판단합니다.
 EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD = 120.0
 
+# 상대방 거래창에 아데나 외 이미지가 올라왔을 때 취소 후 입력할 안내 문구입니다.
+INVALID_TRADE_ITEM_MESSAGE = "아데나만 올려주세요."
+
 # 픽업을 연속으로 여러 번 할 때 같은 창에서 다음 픽업까지 기다리는 최소 시간(초)입니다.
 SAME_PICKUP_DELAY_SECONDS = 1.0
 
@@ -800,6 +803,23 @@ class IndependentHasteMacro:
         self.reset_trade_state()
         sleep_interruptible(0.5, self.role)
 
+    def cancel_invalid_trade_items(self, trade_items: dict[str, object]) -> None:
+        occupied_slots = trade_items.get("occupied_slots", [])
+        print(
+            f"[{self.role}] opponent OK with non-adena/empty trade -> Cancel, "
+            f"trade_state={trade_items.get('state')}, occupied_slots={occupied_slots}"
+        )
+        with input_lock():
+            macro.force_set_foreground_window(macro.lineage1_hwnd)
+            macro.cancelExchange()
+        if sleep_interruptible(0.3, self.role):
+            return
+
+        self.type_string(INVALID_TRADE_ITEM_MESSAGE)
+        self.last_type_string_time = time.time()
+        self.reset_trade_state()
+        sleep_interruptible(0.8, self.role)
+
     def handle_exchange_window_timeout(self, nickname: str) -> bool:
         """거래창이 오래 열려 있으면 닉네임을 자동 차단 목록에 넣고 방향전환합니다."""
         if self.same_nickname_turn_seconds <= 0:
@@ -1079,13 +1099,22 @@ class IndependentHasteMacro:
 
         slot = macro.crop(self.img, 258, 677, 30, 30)
         brightness = macro.get_brightness(slot)
-        print(f"[{self.role}] slot brightness={brightness:.2f}")
+        trade_items = macro.analyze_opponent_trade_items(self.img)
+        trade_state = trade_items["state"]
+        print(
+            f"[{self.role}] slot brightness={brightness:.2f}, "
+            f"trade_state={trade_state}, occupied_slots={trade_items['occupied_slots']}"
+        )
 
         if not self.brightness_changed and brightness > EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD:
-            self.brightness_changed = True
-            with input_lock():
-                macro.force_set_foreground_window(macro.lineage1_hwnd)
-                macro.acceptExchange()
+            if trade_state == "adena_only":
+                self.brightness_changed = True
+                with input_lock():
+                    macro.force_set_foreground_window(macro.lineage1_hwnd)
+                    macro.acceptExchange()
+            else:
+                self.cancel_invalid_trade_items(trade_items)
+                return
         self.prev_brightness = brightness
         sleep_interruptible(0.5, self.role)
 

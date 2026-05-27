@@ -69,6 +69,9 @@ DIRECTION_RETURN_CHECK_INTERVAL = 30.0
 # 거래창 슬롯 영역 평균 밝기가 이 값보다 크면 교환 OK 후보로 판단합니다.
 EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD = 120.0
 
+# 상대방 거래창에 아데나 외 이미지가 올라왔을 때 취소 후 입력할 안내 문구입니다.
+INVALID_TRADE_ITEM_MESSAGE = "아데나만 올려주세요."
+
 # 자동 방향전환 후보로 쓰는 8방향 이름입니다. macro_data.json의 방향별 좌표 키와 맞아야 합니다.
 TURN_DIRECTIONS = (
     "north",
@@ -871,6 +874,25 @@ def exchange_loop():
         _last_type_string_time = time.time()
         return True
 
+    def cancel_invalid_trade_items(trade_items: dict[str, object]) -> bool:
+        nonlocal _last_type_string_time
+
+        occupied_slots = trade_items.get("occupied_slots", [])
+        print(
+            f"[server] 상대방 OK 후 아데나 외/빈 거래창 감지 -> Cancel, "
+            f"trade_state={trade_items.get('state')}, occupied_slots={occupied_slots}"
+        )
+        macro.cancelExchange()
+        if _sleep_interruptible(0.3):
+            return True
+
+        macro.force_set_foreground_window(macro.lineage1_hwnd)
+        macro.arduino_type_string(INVALID_TRADE_ITEM_MESSAGE)
+        _last_type_string_time = time.time()
+        reset_trade_state()
+        _sleep_interruptible(0.8)
+        return True
+
     while running:
         if _request_f12_stop():
             break
@@ -1188,11 +1210,20 @@ def exchange_loop():
 
             slot = macro.crop(img, 258, 677, 30, 30)
             brightness = macro.get_brightness(slot)
-            print(f"[server] 슬롯 밝기: {brightness:.2f}")
+            trade_items = macro.analyze_opponent_trade_items(img)
+            trade_state = trade_items["state"]
+            print(
+                f"[server] 슬롯 밝기: {brightness:.2f}, "
+                f"trade_state={trade_state}, occupied_slots={trade_items['occupied_slots']}"
+            )
 
             if not brightness_changed and brightness > EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD:
-                brightness_changed = True
-                macro.acceptExchange()
+                if trade_state == "adena_only":
+                    brightness_changed = True
+                    macro.acceptExchange()
+                else:
+                    cancel_invalid_trade_items(trade_items)
+                    continue
             prev_brightness = brightness
             if _sleep_interruptible(EXCHANGE_MONITOR_INTERVAL_SECONDS):
                 break

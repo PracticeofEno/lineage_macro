@@ -374,6 +374,14 @@ _F10_SLOT_BRIGHT_THRESHOLD = 70.0
 _F10_SLOT_SATURATION_THRESHOLD = 35
 _F10_SLOT_PIXEL_COUNT_THRESHOLD = 50
 _F10_SLOT_STD_THRESHOLD = 25.0
+_OPPONENT_TRADE_SLOT_ORIGIN = (45, 498)
+_OPPONENT_TRADE_SLOT_SIZE = 62
+_OPPONENT_TRADE_SLOT_COLS = 4
+_OPPONENT_TRADE_SLOT_ROWS = 3
+_OPPONENT_TRADE_SLOT_MARGIN = 8
+_OPPONENT_TRADE_SATURATED_PIXEL_THRESHOLD = 25
+_OPPONENT_TRADE_STD_THRESHOLD = 18.0
+_OPPONENT_TRADE_ADENA_YELLOW_THRESHOLD = 80
 TARGET_CHECK_FAILED_MESSAGE_DEFAULT = "{nickname}님 타겟 확인이 안 됩니다. 다시 거래 부탁드립니다."
 
 
@@ -916,6 +924,79 @@ def get_brightness(image: Image.Image) -> float:
     return float(arr.mean())
 
 
+def _opponent_trade_slot_boxes() -> list[tuple[int, int, int, int]]:
+    origin_x, origin_y = _OPPONENT_TRADE_SLOT_ORIGIN
+    size = _OPPONENT_TRADE_SLOT_SIZE
+    return [
+        (origin_x + col * size, origin_y + row * size, size, size)
+        for row in range(_OPPONENT_TRADE_SLOT_ROWS)
+        for col in range(_OPPONENT_TRADE_SLOT_COLS)
+    ]
+
+
+def _analyze_trade_slot(slot: Image.Image) -> dict[str, float | int | bool]:
+    margin = _OPPONENT_TRADE_SLOT_MARGIN
+    width, height = slot.size
+    center = slot.crop((margin, margin, width - margin, height - margin))
+    arr = np.array(center.convert("RGB"), dtype=np.int16)
+    brightness = arr.mean(axis=2)
+    saturation = arr.max(axis=2) - arr.min(axis=2)
+    yellow = (
+        (arr[:, :, 0] > 90)
+        & (arr[:, :, 1] > 80)
+        & ((arr[:, :, 0] - arr[:, :, 2]) > 35)
+        & ((arr[:, :, 1] - arr[:, :, 2]) > 25)
+        & (arr[:, :, 0] >= arr[:, :, 1] - 25)
+        & (arr[:, :, 0] <= arr[:, :, 1] + 80)
+    )
+    saturated_pixels = int((saturation > 45).sum())
+    yellow_pixels = int(yellow.sum())
+    std = float(arr.std())
+    occupied = (
+        saturated_pixels >= _OPPONENT_TRADE_SATURATED_PIXEL_THRESHOLD
+        or std >= _OPPONENT_TRADE_STD_THRESHOLD
+    )
+    return {
+        "occupied": occupied,
+        "adena_like": yellow_pixels >= _OPPONENT_TRADE_ADENA_YELLOW_THRESHOLD,
+        "saturated_pixels": saturated_pixels,
+        "yellow_pixels": yellow_pixels,
+        "std": std,
+        "mean": float(brightness.mean()),
+    }
+
+
+def analyze_opponent_trade_items(img: Image.Image | None = None) -> dict[str, object]:
+    if img is None:
+        img = screenshot()
+
+    slots = []
+    occupied_slots = []
+    for idx, (x, y, width, height) in enumerate(_opponent_trade_slot_boxes()):
+        if x < 0 or y < 0 or x + width > img.width or y + height > img.height:
+            continue
+        features = _analyze_trade_slot(crop(img, x, y, width, height))
+        slot_no = idx + 1
+        features["slot"] = slot_no
+        slots.append(features)
+        if features["occupied"]:
+            occupied_slots.append(slot_no)
+
+    first_slot = slots[0] if slots else {}
+    if not occupied_slots:
+        state = "empty"
+    elif occupied_slots == [1] and first_slot.get("adena_like"):
+        state = "adena_only"
+    else:
+        state = "invalid"
+
+    return {
+        "state": state,
+        "occupied_slots": occupied_slots,
+        "slots": slots,
+    }
+
+
 def is_f10_slot_occupied(img: Image.Image | None = None) -> bool:
     if img is None:
         img = screenshot()
@@ -1131,6 +1212,13 @@ def acceptExchange():
     arduino_key_press(ord('Y'))
     time.sleep(0.1)
     _arduino_send(f'KP,{win32con.VK_RETURN}')
+    time.sleep(0.3)
+
+
+def cancelExchange():
+    win32api.SetCursorPos((312, 752))
+    time.sleep(0.2)
+    _arduino_send('CL')
     time.sleep(0.3)
 
 

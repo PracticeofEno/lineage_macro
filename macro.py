@@ -364,6 +364,11 @@ _restart_watch_lock = _threading.Lock()
 _restart_watch_thread: _threading.Thread | None = None
 _restart_watch_stop: _threading.Event | None = None
 _last_restart_click_time = 0.0
+_F10_SLOT_CONTENT_REGION = (1070, 840, 54, 46)
+_F10_SLOT_BRIGHT_THRESHOLD = 70.0
+_F10_SLOT_SATURATION_THRESHOLD = 35
+_F10_SLOT_PIXEL_COUNT_THRESHOLD = 50
+_F10_SLOT_STD_THRESHOLD = 25.0
 TARGET_CHECK_FAILED_MESSAGE_DEFAULT = "{nickname}님 타겟 확인이 안 됩니다. 다시 거래 부탁드립니다."
 
 
@@ -905,6 +910,60 @@ def get_brightness(image: Image.Image) -> float:
     """이미지의 평균 밝기(0.0~255.0)를 반환한다."""
     arr = np.array(image.convert('RGB'), dtype=np.float32)
     return float(arr.mean())
+
+
+def is_f10_slot_occupied(img: Image.Image | None = None) -> bool:
+    if img is None:
+        img = screenshot()
+
+    x, y, width, height = _F10_SLOT_CONTENT_REGION
+    if x < 0 or y < 0 or x + width > img.width or y + height > img.height:
+        return False
+
+    arr = np.array(crop(img.convert("RGB"), x, y, width, height))
+    brightness = arr.mean(axis=2)
+    saturation = arr.max(axis=2) - arr.min(axis=2)
+    bright_pixels = int((brightness > _F10_SLOT_BRIGHT_THRESHOLD).sum())
+    saturated_pixels = int((saturation > _F10_SLOT_SATURATION_THRESHOLD).sum())
+    return (
+        bright_pixels >= _F10_SLOT_PIXEL_COUNT_THRESHOLD
+        or saturated_pixels >= _F10_SLOT_PIXEL_COUNT_THRESHOLD
+        or float(arr.std()) >= _F10_SLOT_STD_THRESHOLD
+    )
+
+
+def clear_f10_slot_if_occupied(
+    img: Image.Image | None = None,
+    timeout_seconds: float = 30.0,
+    check_interval: float = 0.2,
+    print_log: bool = True,
+) -> float:
+    hwnd = get_hwnd()
+    if img is None:
+        img = screenshot(hwnd=hwnd)
+    if not is_f10_slot_occupied(img):
+        return 0.0
+
+    force_set_foreground_window(hwnd)
+    started_at = time.time()
+    deadline = started_at + max(0.1, timeout_seconds)
+    key_down(win32con.VK_F10)
+    try:
+        while time.time() < deadline:
+            time.sleep(max(0.05, check_interval))
+            img = screenshot(hwnd=hwnd)
+            if not is_f10_slot_occupied(img):
+                elapsed = time.time() - started_at
+                if print_log:
+                    print(f"[macro] F10 slot cleared - held_seconds={elapsed:.1f}")
+                return elapsed
+    finally:
+        key_up(win32con.VK_F10)
+
+    elapsed = time.time() - started_at
+    if print_log:
+        print(f"[macro] F10 slot still occupied after held_seconds={elapsed:.1f}")
+    return elapsed
 
 
 def _count_bright_pixels(image: Image.Image, region: tuple[int, int, int, int], threshold: int = 235) -> int:

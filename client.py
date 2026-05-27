@@ -68,6 +68,10 @@ def _handle_command(msg: dict) -> dict | None:
     cmd = msg.get("cmd")
 
     if cmd == "ping":
+        logs = []
+        held_seconds = macro.clear_f10_slot_if_occupied()
+        if held_seconds > 0:
+            logs.append(f"F10 slot cleared - held_seconds={held_seconds:.1f}")
         try:
             mp = macro.readMp()
         except macro.RestartButtonClicked:
@@ -75,8 +79,12 @@ def _handle_command(msg: dict) -> dict | None:
             _restart_watcher_stop_reported = True
             return {"status": "stopped", "mp": None, "logs": ["Restart clicked - client macro stopped"]}
         if mp is None:
-            return {"status": "pong", "mp": mp, "logs": ["MP 읽기 실패"]}
-        return {"status": "pong", "mp": mp}
+            logs.append("MP 읽기 실패")
+            return {"status": "pong", "mp": mp, "logs": logs}
+        resp = {"status": "pong", "mp": mp}
+        if logs:
+            resp["logs"] = logs
+        return resp
 
     if cmd == "pickup":
         target = msg.get("target")
@@ -110,6 +118,15 @@ def _handle_command(msg: dict) -> dict | None:
         else:
             logs.append("Restart not visible - client macro stopped")
         return {"status": "stopped", "clicked": clicked, "logs": logs}
+
+    if cmd == "clear_f10":
+        logs = ["F10 슬롯 비우기 명령 수신"]
+        held_seconds = macro.clear_f10_slot_if_occupied()
+        if held_seconds > 0:
+            logs.append(f"F10 slot cleared - held_seconds={held_seconds:.1f}")
+        else:
+            logs.append("F10 slot already empty")
+        return {"status": "ok", "held_seconds": held_seconds, "logs": logs}
 
     if cmd == "chat":
         message = str(msg.get("message", "")).strip()

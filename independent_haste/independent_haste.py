@@ -433,6 +433,23 @@ def run_command_controller(args: argparse.Namespace, config: dict) -> int:
         "client": None,
     }
     reported_exits: set[str] = set()
+    controller_stop = threading.Event()
+    f12_stop_handled = False
+
+    def f12_monitor() -> None:
+        nonlocal f12_stop_handled
+        while not controller_stop.is_set():
+            if is_f12_stop_requested():
+                if not f12_stop_handled:
+                    request_f12_stop("independent")
+                    stop_independent_processes(processes)
+                    f12_stop_handled = True
+            else:
+                f12_stop_handled = False
+            controller_stop.wait(0.05)
+
+    f12_thread = threading.Thread(target=f12_monitor, name="independent-f12-monitor", daemon=True)
+    f12_thread.start()
 
     print("\n명령어: q=종료, 1=independent haste 시작, 2=independent haste 중지")
     try:
@@ -456,6 +473,9 @@ def run_command_controller(args: argparse.Namespace, config: dict) -> int:
         proxy = processes.get("proxy")
         if is_process_alive(proxy):
             stop_child_processes([("proxy", proxy)])
+    finally:
+        controller_stop.set()
+        f12_thread.join(timeout=1.0)
     return 0
 
 

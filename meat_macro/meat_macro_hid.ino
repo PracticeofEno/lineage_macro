@@ -17,6 +17,9 @@
 
 static int curX = 0;
 static int curY = 0;
+static const unsigned long IDLE_RELEASE_MS = 3000;
+static unsigned long lastCommandAtMs = 0;
+static bool idleReleaseSent = false;
 
 int vkToHid(int vk) {
   switch (vk) {
@@ -80,6 +83,20 @@ void moveTo(int targetX, int targetY) {
   }
 }
 
+void releaseAllInputs() {
+  Keyboard.releaseAll();
+  Mouse.release(MOUSE_LEFT);
+  Mouse.release(MOUSE_RIGHT);
+  Mouse.release(MOUSE_MIDDLE);
+}
+
+void releaseInputsAfterIdle() {
+  if (!idleReleaseSent && millis() - lastCommandAtMs >= IDLE_RELEASE_MS) {
+    releaseAllInputs();
+    idleReleaseSent = true;
+  }
+}
+
 void processCommand(const String &cmd) {
   if (cmd.length() == 0) {
     return;
@@ -130,6 +147,7 @@ void setup() {
   Serial.begin(115200);
   Keyboard.begin();
   Mouse.begin();
+  lastCommandAtMs = millis();
 }
 
 void loop() {
@@ -137,5 +155,8 @@ void loop() {
     String line = Serial.readStringUntil('\n');
     line.trim();
     processCommand(line);
+    lastCommandAtMs = millis();
+    idleReleaseSent = false;
   }
+  releaseInputsAfterIdle();
 }

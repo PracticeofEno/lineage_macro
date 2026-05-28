@@ -373,10 +373,13 @@ _OPPONENT_TRADE_SLOT_ORIGIN = (45, 498)
 _OPPONENT_TRADE_SLOT_SIZE = 62
 _OPPONENT_TRADE_SLOT_COLS = 4
 _OPPONENT_TRADE_SLOT_ROWS = 3
-_OPPONENT_TRADE_SLOT_MARGIN = 8
+_OPPONENT_TRADE_SLOT_MARGIN = 6
 _OPPONENT_TRADE_SATURATED_PIXEL_THRESHOLD = 25
 _OPPONENT_TRADE_STD_THRESHOLD = 18.0
 _OPPONENT_TRADE_ADENA_YELLOW_THRESHOLD = 80
+_OPPONENT_TRADE_BACKGROUND_DIFF_THRESHOLD = 60
+_OPPONENT_TRADE_BACKGROUND_DIFF_PIXEL_THRESHOLD = 80
+_OPPONENT_TRADE_BACKGROUND_SAMPLE_SIZE = 8
 TARGET_CHECK_FAILED_MESSAGE_DEFAULT = "{nickname}님 타겟 확인이 안 됩니다. 다시 거래 부탁드립니다."
 
 
@@ -948,15 +951,37 @@ def _analyze_trade_slot(slot: Image.Image) -> dict[str, float | int | bool]:
     saturated_pixels = int((saturation > 45).sum())
     yellow_pixels = int(yellow.sum())
     std = float(arr.std())
+    sample_size = min(
+        _OPPONENT_TRADE_BACKGROUND_SAMPLE_SIZE,
+        max(1, arr.shape[0] // 3),
+        max(1, arr.shape[1] // 3),
+    )
+    background_samples = np.concatenate(
+        [
+            arr[:sample_size, :sample_size].reshape(-1, 3),
+            arr[:sample_size, -sample_size:].reshape(-1, 3),
+            arr[-sample_size:, :sample_size].reshape(-1, 3),
+            arr[-sample_size:, -sample_size:].reshape(-1, 3),
+        ],
+        axis=0,
+    )
+    background = np.median(background_samples, axis=0)
+    background_diff = np.abs(arr - background).sum(axis=2)
+    background_diff_pixels = int(
+        (background_diff > _OPPONENT_TRADE_BACKGROUND_DIFF_THRESHOLD).sum()
+    )
     occupied = (
         saturated_pixels >= _OPPONENT_TRADE_SATURATED_PIXEL_THRESHOLD
         or std >= _OPPONENT_TRADE_STD_THRESHOLD
+        or background_diff_pixels >= _OPPONENT_TRADE_BACKGROUND_DIFF_PIXEL_THRESHOLD
     )
     return {
         "occupied": occupied,
         "adena_like": yellow_pixels >= _OPPONENT_TRADE_ADENA_YELLOW_THRESHOLD,
         "saturated_pixels": saturated_pixels,
         "yellow_pixels": yellow_pixels,
+        "background_diff_pixels": background_diff_pixels,
+        "background_diff_max": float(background_diff.max()),
         "std": std,
         "mean": float(brightness.mean()),
     }

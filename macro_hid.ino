@@ -32,6 +32,9 @@
 // 마우스 절대 좌표 추적용
 static int curX = 0;
 static int curY = 0;
+static const unsigned long IDLE_RELEASE_MS = 3000;
+static unsigned long lastCommandAtMs = 0;
+static bool idleReleaseSent = false;
 
 // ── Windows VK 코드 → Arduino HID 키코드 변환 ──────────────────────────────
 // Arduino Keyboard.h 의 특수키 상수 (Keyboard.h 참고)
@@ -130,6 +133,20 @@ void moveTo(int targetX, int targetY) {
     }
 }
 
+void releaseAllInputs() {
+    Keyboard.releaseAll();
+    Mouse.release(MOUSE_LEFT);
+    Mouse.release(MOUSE_RIGHT);
+    Mouse.release(MOUSE_MIDDLE);
+}
+
+void releaseInputsAfterIdle() {
+    if (!idleReleaseSent && millis() - lastCommandAtMs >= IDLE_RELEASE_MS) {
+        releaseAllInputs();
+        idleReleaseSent = true;
+    }
+}
+
 // ── 명령 파싱 및 실행 ────────────────────────────────────────────────────────
 void processCommand(const String &cmd) {
     if (cmd.length() == 0) return;
@@ -225,6 +242,7 @@ void setup() {
     Serial.begin(115200);
     Keyboard.begin();
     Mouse.begin();
+    lastCommandAtMs = millis();
 }
 
 void loop() {
@@ -232,5 +250,8 @@ void loop() {
         String line = Serial.readStringUntil('\n');
         line.trim();
         processCommand(line);
+        lastCommandAtMs = millis();
+        idleReleaseSent = false;
     }
+    releaseInputsAfterIdle();
 }

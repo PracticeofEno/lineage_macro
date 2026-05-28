@@ -1108,6 +1108,19 @@ class IndependentHasteMacro:
 
         if not self.brightness_changed and brightness > EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD:
             if trade_state == "adena_only":
+                if sleep_interruptible(0.2, self.role):
+                    return
+                self.img = macro.screenshot()
+                confirm_trade_items = macro.analyze_opponent_trade_items(self.img)
+                confirm_trade_state = confirm_trade_items["state"]
+                print(
+                    f"[{self.role}] trade accept recheck: "
+                    f"trade_state={confirm_trade_state}, "
+                    f"occupied_slots={confirm_trade_items['occupied_slots']}"
+                )
+                if confirm_trade_state != "adena_only":
+                    self.cancel_invalid_trade_items(confirm_trade_items)
+                    return
                 self.brightness_changed = True
                 with input_lock():
                     macro.force_set_foreground_window(macro.lineage1_hwnd)

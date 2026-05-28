@@ -1219,6 +1219,19 @@ def exchange_loop():
 
             if not brightness_changed and brightness > EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD:
                 if trade_state == "adena_only":
+                    if _sleep_interruptible(0.2):
+                        break
+                    confirm_img = macro.screenshot()
+                    confirm_trade_items = macro.analyze_opponent_trade_items(confirm_img)
+                    confirm_trade_state = confirm_trade_items["state"]
+                    print(
+                        f"[server] 거래 수락 직전 재확인: "
+                        f"trade_state={confirm_trade_state}, "
+                        f"occupied_slots={confirm_trade_items['occupied_slots']}"
+                    )
+                    if confirm_trade_state != "adena_only":
+                        cancel_invalid_trade_items(confirm_trade_items)
+                        continue
                     brightness_changed = True
                     macro.acceptExchange()
                 else:

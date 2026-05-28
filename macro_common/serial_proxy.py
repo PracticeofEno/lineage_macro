@@ -5,18 +5,26 @@ import threading
 
 import serial
 
+ACCEPT_TIMEOUT_SECONDS = 0.2
+CLIENT_RECV_TIMEOUT_SECONDS = 0.2
+
 
 def handle_serial_proxy_client(
     conn: socket.socket,
     addr: tuple,
     ser: serial.Serial,
     ser_lock: threading.Lock,
+    stop_event: threading.Event,
 ) -> None:
     print(f"[proxy] client connected: {addr}")
     buf = b""
+    conn.settimeout(CLIENT_RECV_TIMEOUT_SECONDS)
     try:
-        while True:
-            chunk = conn.recv(256)
+        while not stop_event.is_set():
+            try:
+                chunk = conn.recv(256)
+            except socket.timeout:
+                continue
             if not chunk:
                 break
             buf += chunk
@@ -47,27 +55,39 @@ def run_serial_proxy(serial_port: str, baud_rate: int, host: str, port: int) -> 
         return 1
 
     ser_lock = threading.Lock()
+    stop_event = threading.Event()
 
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((host, port))
-    server.listen(10)
+    try:
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((host, port))
+        server.listen(10)
+        server.settimeout(ACCEPT_TIMEOUT_SECONDS)
+    except OSError as exc:
+        print(f"[proxy] failed to listen on {host}:{port}: {exc}")
+        server.close()
+        ser.close()
+        return 1
 
     print(f"[proxy] serial={serial_port} baud={baud_rate}")
     print(f"[proxy] listening on {host}:{port}")
 
     try:
-        while True:
-            conn, addr = server.accept()
+        while not stop_event.is_set():
+            try:
+                conn, addr = server.accept()
+            except socket.timeout:
+                continue
             threading.Thread(
                 target=handle_serial_proxy_client,
-                args=(conn, addr, ser, ser_lock),
+                args=(conn, addr, ser, ser_lock, stop_event),
                 daemon=True,
             ).start()
     except KeyboardInterrupt:
         print()
         print("[proxy] stopped")
     finally:
+        stop_event.set()
         server.close()
         ser.close()
     return 0

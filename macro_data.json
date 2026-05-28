@@ -1,6 +1,6 @@
 {
     "server_mouse_x_y": [605, 350],
-    "client_mouse_x_y": [565, 330],
+    "client_mouse_x_y": [485, 290],
     "client_numbering_mouse_x_y": [1359, 314],
 
     "direction_threshold": 6,
@@ -11,15 +11,6 @@
     "high_count_direction": "northwest",
 
     "blocked_list": [
-        "헤이스트가게",
-        "가게여직원",
-        "헤이왕v",
-        "헤이왕m",
-        "오우거혁띠",
-        "골무스테파니",
-        "자판기6f",
-        "자연씨컵",
-        "질서유지"
      ],
 
     "turn_north_xy":     [654, 292],

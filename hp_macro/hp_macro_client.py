@@ -156,7 +156,10 @@ def main() -> int:
     SERVER_HOST = args.host
     SERVER_PORT = args.port
 
+    x, y = 100, 100
     macro.set_hwnd(_find_window(args.title))
+    macro.force_set_foreground_window(macro.lineage1_hwnd)
+    macro.arduino_mouse_shift_click_right(x, y)
 
     print("명령어: 1=연결 시작, 2=연결 중지, q=종료")
     while True:

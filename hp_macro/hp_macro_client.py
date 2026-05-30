@@ -29,6 +29,7 @@ WINDOW_TITLE = "client"
 
 _recv_buffers: dict[socket.socket, bytes] = {}
 running = False
+_click_active = False
 _conn_thread = None
 _click_thread = None
 
@@ -39,9 +40,10 @@ CLICK_INTERVAL = 0.5
 
 def _click_loop() -> None:
     while running:
-        macro.force_set_foreground_window(macro.lineage1_hwnd)
-        win32api.SetCursorPos((CLICK_X, CLICK_Y))
-        macro.arduino_mouse_click_left()
+        if _click_active:
+            macro.force_set_foreground_window(macro.lineage1_hwnd)
+            win32api.SetCursorPos((CLICK_X, CLICK_Y))
+            macro.arduino_mouse_click_left()
         time.sleep(CLICK_INTERVAL)
 
 
@@ -98,11 +100,22 @@ def _press_f8() -> None:
 
 
 def _handle_command(msg: dict) -> dict | None:
+    global _click_active
     cmd = msg.get("cmd")
     req_id = msg.get("req_id")
 
     if cmd == "ping":
         return {"status": "pong", "req_id": req_id}
+
+    if cmd == "start":
+        _click_active = True
+        print("[hp_macro_client] 클릭 루프 시작")
+        return {"status": "ok", "req_id": req_id}
+
+    if cmd == "stop":
+        _click_active = False
+        print("[hp_macro_client] 클릭 루프 정지")
+        return {"status": "ok", "req_id": req_id}
 
     if cmd == "hold_f5":
         seconds = float(msg.get("seconds", 1.0))

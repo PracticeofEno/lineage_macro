@@ -455,6 +455,21 @@ def run() -> None:
 # 진입점
 # ═══════════════════════════════════════════════════════════════════
 
+def _input_loop() -> None:
+    print("[hp_macro_server] 명령어: 1=클라이언트 시작, 2=클라이언트 정지")
+    while _server_running:
+        try:
+            cmd = input("> ").strip()
+        except EOFError:
+            break
+        if cmd == "1":
+            print("[hp_macro_server] 클라이언트에 start 명령 전송")
+            _broadcast({"cmd": "start"}, timeout=5.0)
+        elif cmd == "2":
+            print("[hp_macro_server] 클라이언트에 stop 명령 전송")
+            _broadcast({"cmd": "stop"}, timeout=5.0)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="HP/MP 감시 서버 — 임계치 이하 시 클라이언트에 명령 전송")
     parser.add_argument("--once",         action="store_true", help="HP/MP 1회 읽고 종료")
@@ -485,6 +500,7 @@ def main() -> int:
     server_sock.listen(5)
     print(f"[hp_macro_server] 대기 중: {HOST}:{PORT}")
     threading.Thread(target=_accept_loop, args=(server_sock,), daemon=True).start()
+    threading.Thread(target=_input_loop, daemon=True).start()
 
     try:
         run()

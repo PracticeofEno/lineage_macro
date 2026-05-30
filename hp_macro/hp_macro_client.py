@@ -21,7 +21,7 @@ import macro
 import win32con
 import win32gui
 
-SERVER_HOST = '127.0.0.1'
+SERVER_HOST = '112.185.118.218'
 SERVER_PORT = 9997
 RECONNECT_DELAY = 5
 WINDOW_TITLE = "client"
@@ -29,6 +29,18 @@ WINDOW_TITLE = "client"
 _recv_buffers: dict[socket.socket, bytes] = {}
 running = False
 _conn_thread = None
+_click_thread = None
+
+CLICK_X = 575
+CLICK_Y = 376
+CLICK_INTERVAL = 0.5
+
+
+def _click_loop() -> None:
+    while running:
+        macro.force_set_foreground_window(macro.lineage1_hwnd)
+        macro.arduino_mouse_shift_click_right(CLICK_X, CLICK_Y)
+        time.sleep(CLICK_INTERVAL)
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -150,16 +162,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    global SERVER_HOST, SERVER_PORT, running, _conn_thread
+    global SERVER_HOST, SERVER_PORT, running, _conn_thread, _click_thread
 
     args = parse_args()
     SERVER_HOST = args.host
     SERVER_PORT = args.port
 
-    x, y = 100, 100
-    macro.set_hwnd(_find_window(args.title))
-    macro.force_set_foreground_window(macro.lineage1_hwnd)
-    macro.arduino_mouse_shift_click_right(x, y)
+    macro.set_hwnd(_find_window("client"))
 
     print("명령어: 1=연결 시작, 2=연결 중지, q=종료")
     while True:
@@ -172,6 +181,8 @@ def main() -> int:
                 running = True
                 _conn_thread = threading.Thread(target=_connect_loop, daemon=True)
                 _conn_thread.start()
+                _click_thread = threading.Thread(target=_click_loop, daemon=True)
+                _click_thread.start()
                 print("[hp_macro_client] 연결 시작됨")
             else:
                 print("[hp_macro_client] 이미 실행 중")

@@ -150,6 +150,7 @@ def _connect_loop():
 
 if __name__ == "__main__":
     macro.init_setting("client")
+    # macro.init_custom_hwnd("client", "client")
 
     print("명령어: 1=연결 시작, 2=연결 중지, q=종료")
     while True:

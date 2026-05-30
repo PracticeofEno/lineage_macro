@@ -409,15 +409,20 @@ def run() -> None:
         # ── HP 체크 (몬스터 사냥보다 우선) ────────────────────────
         if hp_state is not None:
             hp_low        = hp_state["maximum"] - hp_state["current"] > 30
+            client_trigger = hp_state["maximum"] != hp_state["current"]
             trigger_ready = now - last_trigger_time >= TRIGGER_COOLDOWN_SECONDS
-            if hp_low and trigger_ready:
-                print(f"[hp_macro_server] HP {hp_state['percent']:.1f}% < {HP_PERCENT_THRESHOLD:.1f}% → hold_f5 {F5_HOLD_SECONDS}s")
+
+            if client_trigger and trigger_ready:
                 t = threading.Thread(
                     target=_broadcast,
                     args=({"cmd": "hold_f5", "seconds": F5_HOLD_SECONDS}, F5_HOLD_SECONDS + 5.0),
                     daemon=True,
                 )
                 t.start()
+
+            if hp_low and trigger_ready:
+                print(f"[hp_macro_server] HP {hp_state['percent']:.1f}% < {HP_PERCENT_THRESHOLD:.1f}% → hold_f5 {F5_HOLD_SECONDS}s")
+                
                 _hold_f5(F5_HOLD_SECONDS)
                 t.join()
                 last_trigger_time = time.time()
@@ -469,30 +474,9 @@ def _input_loop() -> None:
             print("[hp_macro_server] 클라이언트에 stop 명령 전송")
             _broadcast({"cmd": "stop"}, timeout=5.0)
 
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="HP/MP 감시 서버 — 임계치 이하 시 클라이언트에 명령 전송")
-    parser.add_argument("--once",         action="store_true", help="HP/MP 1회 읽고 종료")
-    parser.add_argument("--sample-colors", action="store_true", help="HP 영역 색상 후보 출력 후 종료")
-    parser.add_argument("--sample-limit", type=int, default=20, help="--sample-colors 출력 개수")
-    return parser.parse_args()
-
-
 def main() -> int:
     global _server_running
-
-    args = parse_args()
-
     macro.set_hwnd(_find_window(WINDOW_TITLE))
-
-    if args.sample_colors:
-        sample_hp_colors(args.sample_limit)
-        return 0
-
-    if args.once:
-        img = macro.screenshot()
-        print(f"[hp_macro_server] {_fmt_stat('HP', read_hp_state(img))}, {_fmt_stat('MP', read_mp_state(img))}")
-        return 0
 
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

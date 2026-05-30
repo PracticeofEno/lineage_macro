@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import macro
+import win32api
 import win32con
 import win32gui
 
@@ -39,7 +40,8 @@ CLICK_INTERVAL = 0.5
 def _click_loop() -> None:
     while running:
         macro.force_set_foreground_window(macro.lineage1_hwnd)
-        macro.arduino_mouse_shift_click_right(CLICK_X, CLICK_Y)
+        win32api.SetCursorPos((CLICK_X, CLICK_Y))
+        macro.arduino_mouse_click_left()
         time.sleep(CLICK_INTERVAL)
 
 

@@ -32,6 +32,7 @@ _recv_buffers: dict[socket.socket, bytes] = {}
 running = False
 _hold_f5_active = False
 _conn_thread = None
+_current_conn: socket.socket | None = None
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -119,6 +120,8 @@ def _handle_command(msg: dict) -> dict | None:
 
 
 def _run(conn: socket.socket):
+    global _current_conn
+    _current_conn = conn
     print("[hp_macro_client] 서버 연결됨")
     while running:
         msg = _recv_json(conn)
@@ -130,6 +133,7 @@ def _run(conn: socket.socket):
             if not _send_json(conn, resp):
                 print("[hp_macro_client] 응답 전송 실패")
                 break
+    _current_conn = None
 
 
 def _connect_loop():
@@ -179,6 +183,8 @@ def main() -> int:
                 while running:
                     if _hold_f5_active:
                         _hold_f5_and_click(0)
+                        if _current_conn:
+                            _recv_buffers.pop(_current_conn, None)
                     time.sleep(CLICK_INTERVAL)
                     macro.arduino_mouse_click_left()
                     time.sleep(0.1)

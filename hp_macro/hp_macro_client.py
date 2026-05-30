@@ -33,8 +33,8 @@ _click_active = False
 _conn_thread = None
 _click_thread = None
 
-CLICK_X = 575
-CLICK_Y = 376
+CLICK_X = 605
+CLICK_Y = 360
 CLICK_INTERVAL = 0.5
 
 

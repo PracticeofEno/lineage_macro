@@ -658,6 +658,13 @@ def shake_mouse_small(count=10, dist=10, delay=0.05):
         arduino_mouse_move_rel(-dist, 0) # 왼쪽으로 2
         time.sleep(delay)
 
+
+def arduino_mouse_drag(x1: int, y1: int, x2: int, y2: int):
+    """(x1,y1)에서 (x2,y2)까지 드래그앤드롭. Arduino DD 명령 사용."""
+    force_set_foreground_window(lineage1_hwnd)
+    time.sleep(0.5)
+    _arduino_send(f'DD,{x1},{y1},{x2},{y2}')
+
 def use_potion():
     force_set_foreground_window(lineage1_hwnd)
     time.sleep(0.5)

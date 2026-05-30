@@ -7,7 +7,7 @@ hp_macro_server.py - HP/MP 감시 서버
 
 import argparse
 from collections import Counter
-from ctypes import windll
+import cv2
 import json
 import socket
 import threading
@@ -19,7 +19,6 @@ from typing import Any
 import numpy as np
 import win32con
 import win32gui
-import win32ui
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +26,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import macro
+from tmp2 import detect_from_bgr, GAME_AREA_Y_RATIO
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -43,8 +43,11 @@ TRIGGER_COOLDOWN_SECONDS = 2.5
 STATUS_INTERVAL_SECONDS  = 1.0
 PING_INTERVAL_SECONDS    = 5.0
 
+MONSTER_EXP_TIMEOUT   = 30.0   # EXP 변화 없으면 다음 몬스터 탐색까지 최대 대기 시간(초)
+MONSTER_POLL_INTERVAL = 1.0    # EXP 폴링 간격(초)
+
 HP_READ: dict[str, Any] = {
-    "x": 980, "y": 100, "width": 80, "height": 21,
+    "x": 976, "y": 71, "width": 80, "height": 21,
     "color_rgb":       (247, 201, 227),
     "x_offsets":       [0, 5, 10],
     "text_x_offsets":  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
@@ -61,97 +64,19 @@ MP_READ: dict[str, Any] = {
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 이미지 읽기 (내재화)
-# ═══════════════════════════════════════════════════════════════════
-
-# HP/MP 표시에 필요한 문자(숫자 0-9, /) 픽셀 패턴 → 문자 매핑
-_CHAR_MAP: dict[str, str] = {
-    "21321421548494104115556": "/",
-    "08090100110120131819110111112113262728292102112122132142153103154541041555565758595105115125136667686961061176777879710711": "0",
-    "262153631545464748494104114124134144155556575859510511512513514515615715": "1",
-    "060130140151131141152521121221321421535315454104155556575859510515666768615767778713714715": "2",
-    "060132521021535310315454104155556575859510511512513514515666768611612613767778711712713": "3",
-    "01001111011128292102113114641155565758595105115125135145156667686961061161261376777879710711712713811911": "4",
-    "050607080131516171825262728211215353831545484155558595105115125135145156561061161261375710711712713": "5",
-    "06070809010011012013161718191102526272829210215353103154541041555565105115125135145156661161261376711712713": "6",
-    "06253545410411412413414415555859510511512513657576": "7",
-    "0607080110120131617181112526272829210211215353103154541041555585951051151251351451568611612613767778711712713": "8",
-    "0801301401518115262728292102153103154541041555565758595105115125136667686961061176777879710711": "9",
-}
-
-
-def _lookup(coord_string: str) -> str | None:
-    return _CHAR_MAP.get(coord_string)
-
-
-def _image_to_coord_string(image: Image.Image, color: tuple) -> str:
-    arr = np.array(image.convert("RGB"))
-    r, g, b = color
-    mask = (arr[:, :, 0] == r) & (arr[:, :, 1] == g) & (arr[:, :, 2] == b)
-    ys, xs = np.where(mask)
-    return "".join(f"{x}{y}" for x, y in sorted(zip(xs, ys)))
-
-
-def _crop(image: Image.Image, x: int, y: int, w: int, h: int) -> Image.Image:
-    return image.crop((x, y, x + w, y + h))
-
-
-def _read_text(image: Image.Image, x: int, y: int, color: tuple) -> str:
-    result = []
-    while x < image.width:
-        for char_width in (10, 20):
-            if x + char_width > image.width:
-                continue
-            s = _image_to_coord_string(_crop(image, x, y, char_width, 24), color)
-            ch = _lookup(s)
-            if ch is not None:
-                result.append(ch)
-                x += char_width
-                break
-        else:
-            break
-    return "".join(result)
-
-
-def _screenshot(hwnd: int) -> Image.Image:
-    rect = win32gui.GetWindowRect(hwnd)
-    w, h = rect[2] - rect[0], rect[3] - rect[1]
-
-    hwnd_dc = win32gui.GetWindowDC(hwnd)
-    mfc_dc  = win32ui.CreateDCFromHandle(hwnd_dc)
-    save_dc = mfc_dc.CreateCompatibleDC()
-    bitmap  = win32ui.CreateBitmap()
-    bitmap.CreateCompatibleBitmap(mfc_dc, w, h)
-    save_dc.SelectObject(bitmap)
-    windll.user32.PrintWindow(hwnd, save_dc.GetSafeHdc(), 3)
-
-    bmpinfo = bitmap.GetInfo()
-    bmpstr  = bitmap.GetBitmapBits(True)
-    img = Image.frombuffer("RGB", (bmpinfo["bmWidth"], bmpinfo["bmHeight"]),
-                           bmpstr, "raw", "BGRX", 0, 1)
-
-    win32gui.DeleteObject(bitmap.GetHandle())
-    save_dc.DeleteDC()
-    mfc_dc.DeleteDC()
-    win32gui.ReleaseDC(hwnd, hwnd_dc)
-
-    return img.crop((0, 0, img.width - 16, img.height - 41))
-
-
-# ═══════════════════════════════════════════════════════════════════
-# HP/MP 읽기
+# HP/MP 읽기  (캡처·텍스트 인식 모두 macro.py 위임)
 # ═══════════════════════════════════════════════════════════════════
 
 def _read_stat_text(cfg: dict, img: Image.Image) -> str:
-    x, y = int(cfg["x"]), int(cfg["y"])
+    x, y  = int(cfg["x"]), int(cfg["y"])
     w, h  = int(cfg["width"]), int(cfg["height"])
     color = tuple(int(v) for v in cfg["color_rgb"])
     best  = ""
     for dx in cfg.get("x_offsets", [0]):
-        cropped = _crop(img, x + int(dx), y, w, h)
+        cropped = macro.crop(img, x + int(dx), y, w, h)
         for ty in cfg.get("text_y_offsets", [0]):
             for tx in cfg.get("text_x_offsets", [0]):
-                text = _read_text(cropped, int(tx), int(ty), color)
+                text = macro.read_text(cropped, int(tx), int(ty), color)
                 if len(text) > len(best):
                     best = text
     return best
@@ -182,12 +107,11 @@ def read_mp_state(img: Image.Image) -> dict | None:
 def sample_hp_colors(limit: int) -> None:
     x, y = int(HP_READ["x"]), int(HP_READ["y"])
     w, h  = int(HP_READ["width"]), int(HP_READ["height"])
-    img     = _screenshot(macro.lineage1_hwnd)
-    cropped = _crop(img, x, y, w, h).convert("RGB")
+    img     = macro.screenshot()
+    cropped = macro.crop(img, x, y, w, h).convert("RGB")
     counts  = Counter(cropped.getdata())
 
     print(f"[hp_macro_server] sample  x={x} y={y} w={w} h={h}")
-
     print("[hp_macro_server] top colors:")
     for (r, g, b), n in counts.most_common(limit):
         print(f"  ({r},{g},{b}) #{r:02X}{g:02X}{b:02X}  count={n}")
@@ -359,6 +283,47 @@ def _hold_f5(seconds: float) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 몬스터 탐지 및 공격
+# ═══════════════════════════════════════════════════════════════════
+
+_drag_target_y: int | None = None
+
+
+def _get_drag_target_y() -> int:
+    global _drag_target_y
+    if _drag_target_y is None:
+        img = macro.screenshot()
+        _drag_target_y = int(img.height * GAME_AREA_Y_RATIO) - 5
+    return _drag_target_y
+
+
+def _bgr_screenshot() -> np.ndarray:
+    img_pil = macro.screenshot()
+    return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+
+
+def click_drag_monster(cx: int, cy: int) -> None:
+    """몬스터 좌표(cx, cy)를 클릭 후 화면 하단까지 드래그하고 버튼을 릴리스한다."""
+    drag_y = _get_drag_target_y()
+    print(f"[hp_macro_server] 드래그: ({cx},{cy}) → ({cx},{drag_y})")
+    macro.arduino_mouse_drag(cx, cy, cx, drag_y)
+
+
+def _detect_monster() -> tuple[int, int] | None:
+    """스크린샷에서 가장 큰 몬스터를 탐지하고 중심 좌표를 반환한다. 없으면 None."""
+    try:
+        img_bgr = _bgr_screenshot()
+        detected, monsters = detect_from_bgr(img_bgr)
+        if not detected or not monsters:
+            return None
+        biggest = max(monsters, key=lambda m: m['area'])
+        return biggest['center']
+    except Exception as e:
+        print(f"[hp_macro_server] 몬스터 탐지 오류: {e}")
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 윈도우 찾기
 # ═══════════════════════════════════════════════════════════════════
 
@@ -394,6 +359,12 @@ def run() -> None:
     last_trigger_time = 0.0
     last_status_time  = 0.0
     last_f8_time      = 0.0
+    last_exp_check    = 0.0
+
+    # 몬스터 사냥 상태머신: 'idle' | 'hunting'
+    hunt_state:    str       = 'idle'
+    hunt_prev_exp: str | None = None
+    hunt_start:    float     = 0.0
 
     print(
         f"[hp_macro_server] start"
@@ -406,23 +377,27 @@ def run() -> None:
     )
 
     while True:
-        img      = _screenshot(macro.lineage1_hwnd)
+        img      = macro.screenshot()
         hp_state = read_hp_state(img)
         mp_state = read_mp_state(img)
         now      = time.time()
 
+        # ── 상태 출력 ──────────────────────────────────────────────
         if now - last_status_time >= STATUS_INTERVAL_SECONDS:
-            print(f"[hp_macro_server] {_fmt_stat('HP', hp_state)}, {_fmt_stat('MP', mp_state)}")
+            print(f"[hp_macro_server] {_fmt_stat('HP', hp_state)}, {_fmt_stat('MP', mp_state)}"
+                  f"  hunt={hunt_state}")
             last_status_time = now
 
+        # ── MP 체크 ────────────────────────────────────────────────
         if mp_state is not None:
-            mp_low     = mp_state["percent"] < MP_PERCENT_THRESHOLD
-            f8_ready   = now - last_f8_time >= F8_COOLDOWN_SECONDS
+            mp_low   = mp_state["percent"] < MP_PERCENT_THRESHOLD
+            f8_ready = now - last_f8_time >= F8_COOLDOWN_SECONDS
             if mp_low and f8_ready:
                 print(f"[hp_macro_server] MP {mp_state['percent']:.1f}% < {MP_PERCENT_THRESHOLD:.1f}% → press_f8")
                 if _broadcast({"cmd": "press_f8"}, timeout=5.0):
                     last_f8_time = time.time()
 
+        # ── HP 체크 (몬스터 사냥보다 우선) ────────────────────────
         if hp_state is not None:
             hp_low        = hp_state["percent"] < HP_PERCENT_THRESHOLD
             trigger_ready = now - last_trigger_time >= TRIGGER_COOLDOWN_SECONDS
@@ -437,6 +412,32 @@ def run() -> None:
                 _hold_f5(F5_HOLD_SECONDS)
                 t.join()
                 last_trigger_time = time.time()
+                # HP 회복 직후 몬스터 재탐지
+                hunt_state = 'idle'
+
+        # ── 몬스터 사냥 상태머신 ───────────────────────────────────
+        if hunt_state == 'idle':
+            pos = _detect_monster()
+            if pos is not None:
+                cx, cy = pos
+                print(f"[hp_macro_server] 몬스터 탐지됨: center=({cx}, {cy})")
+                # click_drag_monster(cx, cy)
+                hunt_prev_exp  = macro.readExp()
+                hunt_start     = time.time()
+                last_exp_check = time.time()
+                hunt_state     = 'hunting'
+
+        elif hunt_state == 'hunting':
+            if now - last_exp_check >= MONSTER_POLL_INTERVAL:
+                last_exp_check = now
+                curr_exp = macro.readExp()
+                elapsed  = now - hunt_start
+                if curr_exp != hunt_prev_exp:
+                    print(f"[hp_macro_server] EXP 변화: {hunt_prev_exp} → {curr_exp}, 다음 몬스터 탐색")
+                    hunt_state = 'idle'
+                elif elapsed >= MONSTER_EXP_TIMEOUT:
+                    print(f"[hp_macro_server] {MONSTER_EXP_TIMEOUT:.0f}초 EXP 변화 없음, 다음 몬스터 탐색")
+                    hunt_state = 'idle'
 
         time.sleep(POLL_INTERVAL_SECONDS)
 
@@ -465,7 +466,7 @@ def main() -> int:
         return 0
 
     if args.once:
-        img = _screenshot(macro.lineage1_hwnd)
+        img = macro.screenshot()
         print(f"[hp_macro_server] {_fmt_stat('HP', read_hp_state(img))}, {_fmt_stat('MP', read_mp_state(img))}")
         return 0
 

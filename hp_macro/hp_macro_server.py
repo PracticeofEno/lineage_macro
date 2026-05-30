@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import win32api
 import win32con
 import win32gui
 from PIL import Image
@@ -26,7 +27,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import macro
-from tmp2 import detect_from_bgr, GAME_AREA_Y_RATIO
+from tmp2 import detect_from_bgr
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -286,15 +287,8 @@ def _hold_f5(seconds: float) -> None:
 # 몬스터 탐지 및 공격
 # ═══════════════════════════════════════════════════════════════════
 
-_drag_target_y: int | None = None
-
-
-def _get_drag_target_y() -> int:
-    global _drag_target_y
-    if _drag_target_y is None:
-        img = macro.screenshot()
-        _drag_target_y = int(img.height * GAME_AREA_Y_RATIO) - 5
-    return _drag_target_y
+DRAG_TARGET_X = 616
+DRAG_TARGET_Y = 801
 
 
 def _bgr_screenshot() -> np.ndarray:
@@ -302,11 +296,26 @@ def _bgr_screenshot() -> np.ndarray:
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
+def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25, step_delay: float = 0.01) -> None:
+    """SetCursorPos로 이동, Arduino LP/DR로 좌버튼 누름/뗌."""
+    macro.force_set_foreground_window(macro.lineage1_hwnd)
+    time.sleep(0.3)
+    win32api.SetCursorPos((x1, y1))
+    time.sleep(0.1)
+    macro.arduino_mouse_left_down()
+    time.sleep(0.1)
+    win32api.SetCursorPos((x2, y2))
+    for i in range(1, steps + 1):
+        t = i / steps
+        win32api.SetCursorPos((round(x1 + (x2 - x1) * t), round(y1 + (y2 - y1) * t)))
+        time.sleep(0.001)
+    macro.arduino_mouse_left_up()
+
+
 def click_drag_monster(cx: int, cy: int) -> None:
-    """몬스터 좌표(cx, cy)를 클릭 후 화면 하단까지 드래그하고 버튼을 릴리스한다."""
-    drag_y = _get_drag_target_y()
-    print(f"[hp_macro_server] 드래그: ({cx},{cy}) → ({cx},{drag_y})")
-    macro.arduino_mouse_drag(cx, cy, cx, drag_y)
+    """몬스터 좌표(cx, cy)를 클릭 후 고정 좌표까지 드래그하고 버튼을 릴리스한다."""
+    print(f"[hp_macro_server] 드래그: ({cx},{cy}) → ({DRAG_TARGET_X},{DRAG_TARGET_Y})")
+    _setcursor_drag(cx, cy, DRAG_TARGET_X, DRAG_TARGET_Y)
 
 
 def _detect_monster() -> tuple[int, int] | None:
@@ -399,7 +408,7 @@ def run() -> None:
 
         # ── HP 체크 (몬스터 사냥보다 우선) ────────────────────────
         if hp_state is not None:
-            hp_low        = hp_state["percent"] < HP_PERCENT_THRESHOLD
+            hp_low        = hp_state["maximum"] - hp_state["current"] > 30
             trigger_ready = now - last_trigger_time >= TRIGGER_COOLDOWN_SECONDS
             if hp_low and trigger_ready:
                 print(f"[hp_macro_server] HP {hp_state['percent']:.1f}% < {HP_PERCENT_THRESHOLD:.1f}% → hold_f5 {F5_HOLD_SECONDS}s")
@@ -421,7 +430,7 @@ def run() -> None:
             if pos is not None:
                 cx, cy = pos
                 print(f"[hp_macro_server] 몬스터 탐지됨: center=({cx}, {cy})")
-                # click_drag_monster(cx, cy)
+                click_drag_monster(cx, cy)
                 hunt_prev_exp  = macro.readExp()
                 hunt_start     = time.time()
                 last_exp_check = time.time()

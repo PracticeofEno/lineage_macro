@@ -11,10 +11,11 @@
  *   KP,<vk>         키 누름 + 뗌
  *   CL,<x>,<y>      마우스 좌클릭  (절대 좌표 이동 후 클릭)
  *   CR,<x>,<y>      마우스 우클릭  (절대 좌표 이동 후 클릭)
- *   MM,<x>,<y>      마우스 이동    (절대 좌표)
  *   CL              마우스 좌클릭  (이동 없이 현재 위치에서 클릭)
  *   CR              마우스 우클릭  (이동 없이 현재 위치에서 클릭)
  *   DD,<x1>,<y1>,<x2>,<y2>  드래그앤드롭 (x1,y1)→(x2,y2)
+ *   LP              좌버튼 누름 (이동 없이, SetCursorPos와 함께 사용)
+ *   LR              좌버튼 뗌   (이동 없이, SetCursorPos와 함께 사용)
  *   RM,<dx>,<dy>    마우스 상대 이동
  *   BS,<n>          백스페이스 n 회
  *   INIT            마우스 커서를 (0,0) 으로 초기화
@@ -150,15 +151,15 @@ void processCommand(const String &cmd) {
 
         if (action == "KD") {
             Keyboard.press(hid);
-            delay(30);
+            delay(10);
         } else if (action == "KU") {
             Keyboard.release(hid);
-            delay(30);
+            delay(10);
         } else {  // KP
             Keyboard.press(hid);
-            delay(30);
+            delay(10);
             Keyboard.release(hid);
-            delay(30);
+            delay(10);
         }
 
     // ── 백스페이스 n 회 ──
@@ -166,18 +167,10 @@ void processCommand(const String &cmd) {
         int n = rest.toInt();
         for (int i = 0; i < n; i++) {
             Keyboard.press(HID_KEY_BACKSPACE);
-            delay(30);
+            delay(10);
             Keyboard.release(HID_KEY_BACKSPACE);
-            delay(30);
+            delay(10);
         }
-
-    // ── 마우스 이동 ──
-    } else if (action == "MM") {
-        int c2 = rest.indexOf(',');
-        int x  = rest.substring(0, c2).toInt();
-        int y  = rest.substring(c2 + 1).toInt();
-        moveTo(x, y);
-
     // ── 마우스 좌클릭 (좌표 있으면 이동 후 클릭, 없으면 현재 위치) ──
     } else if (action == "CL") {
         if (rest.length() > 0) {
@@ -185,7 +178,7 @@ void processCommand(const String &cmd) {
             int x  = rest.substring(0, c2).toInt();
             int y  = rest.substring(c2 + 1).toInt();
             moveTo(x, y);
-            delay(30);
+            delay(10);
         }
         Mouse.press(MOUSE_LEFT);
         delay(50);
@@ -198,11 +191,19 @@ void processCommand(const String &cmd) {
             int x  = rest.substring(0, c2).toInt();
             int y  = rest.substring(c2 + 1).toInt();
             moveTo(x, y);
-            delay(30);
+            delay(10);
         }
         Mouse.press(MOUSE_RIGHT);
         delay(50);
         Mouse.release(MOUSE_RIGHT);
+
+    // ── 좌버튼 누름 (이동 없이) ──
+    } else if (action == "LP") {
+        Mouse.press(MOUSE_LEFT);
+
+    // ── 좌버튼 뗌 (이동 없이) ──
+    } else if (action == "LR") {
+        Mouse.release(MOUSE_LEFT);
 
     // ── 드래그앤드롭 ──
     } else if (action == "DD") {

@@ -90,6 +90,7 @@ lineage1_hwnd = None
 # arduino_proxy.py 가 127.0.0.1:9998 에서 실행 중이어야 한다.
 _PROXY_HOST = '127.0.0.1'
 _PROXY_PORT = 9998
+
 _proxy_conn: _socket.socket | None = None
 _proxy_lock = _threading.Lock()
 
@@ -155,11 +156,24 @@ def arduino_key_press(vk: int, duration: float = 0.05):
 
 
 def arduino_mouse_move(x: int, y: int):
-    _arduino_send(f'MM,{x},{y}')
+    hx = round(x * _MOUSE_HID_PER_PX)
+    hy = round(y * _MOUSE_HID_PER_PX)
+    _arduino_send(f'MM,{hx},{hy}')
+    print("AA")
 
 
 def arduino_mouse_click_left():
     _arduino_send('CL')
+
+
+def arduino_mouse_left_down():
+    """좌버튼 누름 (이동 없이). SetCursorPos로 위치 설정 후 호출."""
+    _arduino_send('LP')
+
+
+def arduino_mouse_left_up():
+    """좌버튼 뗌 (이동 없이)."""
+    _arduino_send('LR')
 
 
 def arduino_mouse_click_right(x: int, y: int):
@@ -629,6 +643,10 @@ def screenshot(filename: str = None, hwnd: int = None) -> Image.Image:
 
 
 
+def mouse_move(x: int, y: int):
+    arduino_mouse_move(x, y)
+
+
 def mouse_click_right(x: int, y: int):
     arduino_mouse_click_right(x, y)
 
@@ -657,13 +675,6 @@ def shake_mouse_small(count=10, dist=10, delay=0.05):
         time.sleep(delay)
         arduino_mouse_move_rel(-dist, 0) # 왼쪽으로 2
         time.sleep(delay)
-
-
-def arduino_mouse_drag(x1: int, y1: int, x2: int, y2: int):
-    """(x1,y1)에서 (x2,y2)까지 드래그앤드롭. Arduino DD 명령 사용."""
-    force_set_foreground_window(lineage1_hwnd)
-    time.sleep(0.5)
-    _arduino_send(f'DD,{x1},{y1},{x2},{y2}')
 
 def use_potion():
     force_set_foreground_window(lineage1_hwnd)

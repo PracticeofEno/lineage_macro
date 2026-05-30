@@ -624,16 +624,34 @@ def _read_adena_after_exchange(adena_before: int | None, timeout: float = 6.0) -
             return last_value
 
 
-def _clear_chat_input() -> None:
+def _clear_chat_input() -> bool:
+    """Clear all visible chat input text, if any."""
+    img = macro.screenshot(hwnd=macro.lineage1_hwnd)
+    input_text = macro.readInputText(img).strip()
+
     macro.arduino_key_down(win32con.VK_CONTROL)
-    macro.arduino_key_press(win32con.VK_BACK)
+    deadline = time.time() + 0.2
+    while time.time() < deadline:
+        macro.arduino_key_press(win32con.VK_BACK)
     macro.arduino_key_up(win32con.VK_CONTROL)
     time.sleep(0.1)
+
+    img = macro.screenshot(hwnd=macro.lineage1_hwnd)
+    remaining_text = macro.readInputText(img).strip()
+    if remaining_text:
+        macro.arduino_key_down(win32con.VK_CONTROL)
+        deadline = time.time() + 0.2
+        while time.time() < deadline:
+            macro.arduino_key_press(win32con.VK_BACK)
+        macro.arduino_key_up(win32con.VK_CONTROL)
+        time.sleep(0.1)
+    return bool(input_text or remaining_text)
 
 
 def _read_nickname_at_xy(check_xy: tuple[int, int]) -> str:
     x, y = check_xy
     macro.force_set_foreground_window(macro.lineage1_hwnd)
+    _clear_chat_input()
     macro.arduino_mouse_shift_click_right(x, y)
     time.sleep(0.15)
 

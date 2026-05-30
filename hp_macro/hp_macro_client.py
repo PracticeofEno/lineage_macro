@@ -180,6 +180,9 @@ def main() -> int:
                     if _hold_f5_active:
                         _hold_f5_and_click(0)
                     time.sleep(CLICK_INTERVAL)
+                    macro.arduino_mouse_click_left()
+                    time.sleep(0.1)
+                    
             else:
                 print("[hp_macro_client] 이미 실행 중")
 

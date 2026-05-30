@@ -26,25 +26,12 @@ SERVER_HOST = '112.185.118.218'
 SERVER_PORT = 9997
 RECONNECT_DELAY = 5
 WINDOW_TITLE = "client"
+CLICK_INTERVAL = 0.5
 
 _recv_buffers: dict[socket.socket, bytes] = {}
 running = False
-_click_active = False
+_hold_f5_active = False
 _conn_thread = None
-_click_thread = None
-
-CLICK_X = 605
-CLICK_Y = 360
-CLICK_INTERVAL = 0.5
-
-
-def _click_loop() -> None:
-    while running:
-        if _click_active:
-            macro.force_set_foreground_window(macro.lineage1_hwnd)
-            win32api.SetCursorPos((CLICK_X, CLICK_Y))
-            macro.arduino_mouse_click_left()
-        time.sleep(CLICK_INTERVAL)
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -100,7 +87,7 @@ def _press_f8() -> None:
 
 
 def _handle_command(msg: dict) -> dict | None:
-    global _click_active
+    global _hold_f5_active, running
     cmd = msg.get("cmd")
     req_id = msg.get("req_id")
 
@@ -108,19 +95,18 @@ def _handle_command(msg: dict) -> dict | None:
         return {"status": "pong", "req_id": req_id}
 
     if cmd == "start":
-        _click_active = True
-        print("[hp_macro_client] 클릭 루프 시작")
+        _hold_f5_active = True
+        print("[hp_macro_client] hold_f5 루프 시작")
         return {"status": "ok", "req_id": req_id}
 
     if cmd == "stop":
-        _click_active = False
-        print("[hp_macro_client] 클릭 루프 정지")
+        running = False
+        _hold_f5_active = False
+        print("[hp_macro_client] hold_f5 루프 정지")
         return {"status": "ok", "req_id": req_id}
 
     if cmd == "hold_f5":
-        seconds = float(msg.get("seconds", 1.0))
-        print(f"[hp_macro_client] hold_f5 {seconds}s → 좌클릭")
-        _hold_f5_and_click(seconds)
+        _hold_f5_active = True
         return {"status": "ok", "req_id": req_id}
 
     if cmd == "press_f8":
@@ -167,21 +153,8 @@ def _connect_loop():
             print(f"[hp_macro_client] {RECONNECT_DELAY}초 후 재연결...")
             time.sleep(RECONNECT_DELAY)
 
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="HP/MP 액션 클라이언트 — F5 홀드 + 좌클릭, F8 입력")
-    parser.add_argument("--host", default=SERVER_HOST, help=f"서버 IP (기본값: {SERVER_HOST})")
-    parser.add_argument("--port", type=int, default=SERVER_PORT, help=f"서버 포트 (기본값: {SERVER_PORT})")
-    parser.add_argument("--title", default=WINDOW_TITLE, help="게임 윈도우 타이틀 접두사")
-    return parser.parse_args()
-
-
 def main() -> int:
-    global SERVER_HOST, SERVER_PORT, running, _conn_thread, _click_thread
-
-    args = parse_args()
-    SERVER_HOST = args.host
-    SERVER_PORT = args.port
+    global SERVER_HOST, SERVER_PORT, running, _conn_thread
 
     macro.set_hwnd(_find_window("client"))
 
@@ -192,18 +165,23 @@ def main() -> int:
             running = False
             break
         elif cmd == "1":
+            macro.force_set_foreground_window(macro.lineage1_hwnd)
+            time.sleep(0.5)
+            win32api.SetCursorPos((605,360))
+            time.sleep(0.5)
+            macro.arduino_mouse_click_left()
+            time.sleep(0.5)
             if _conn_thread is None or not _conn_thread.is_alive():
                 running = True
                 _conn_thread = threading.Thread(target=_connect_loop, daemon=True)
                 _conn_thread.start()
-                _click_thread = threading.Thread(target=_click_loop, daemon=True)
-                _click_thread.start()
                 print("[hp_macro_client] 연결 시작됨")
+                while running:
+                    if _hold_f5_active:
+                        _hold_f5_and_click(0)
+                    time.sleep(CLICK_INTERVAL)
             else:
                 print("[hp_macro_client] 이미 실행 중")
-        elif cmd == "2":
-            running = False
-            print("[hp_macro_client] 연결 중지됨")
 
     return 0
 

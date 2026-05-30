@@ -693,15 +693,6 @@ class IndependentHasteMacro:
             macro.force_set_foreground_window(macro.lineage1_hwnd)
             macro.key_press(vk)
 
-    def clear_f10_slot_if_needed(self) -> bool:
-        with input_lock():
-            held_seconds = macro.clear_f10_slot_if_occupied(img=self.img)
-        if held_seconds <= 0:
-            return False
-        print(f"[{self.role}] F10 slot cleared - held_seconds={held_seconds:.1f}")
-        self.img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-        return True
-
     def press_f7(self) -> None:
         with input_lock():
             macro.force_set_foreground_window(macro.lineage1_hwnd)
@@ -723,7 +714,6 @@ class IndependentHasteMacro:
     def update_mp(self) -> None:
         """현재 창 스크린샷에서 MP를 읽고, MP/20으로 가능한 헤이스트 횟수를 계산합니다."""
         self.img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-        self.clear_f10_slot_if_needed()
         mp = macro.readMp(self.img)
         if mp is None:
             print(f"[{self.role}] MP read failed; keeping previous MP={self.current_mp}")
@@ -1017,7 +1007,6 @@ class IndependentHasteMacro:
         if self.turn_to(self.shop_direction):
             print(f"[{self.role}] keep direction -> {self.shop_direction}")
             self.img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-            self.clear_f10_slot_if_needed()
 
         if time.time() - self.last_type_string_time >= 10:
             self.type_string(macro.get_adena_price_notice())
@@ -1044,7 +1033,6 @@ class IndependentHasteMacro:
             if self.turn_to(self.shop_direction, force=True):
                 print(f"[{self.role}] force shop direction -> {self.shop_direction}")
                 self.img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-                self.clear_f10_slot_if_needed()
             self.last_shop_direction_force_time = time.time()
             sleep_interruptible(0.2, self.role)
             return
@@ -1077,7 +1065,6 @@ class IndependentHasteMacro:
     def handle_read_adena_stage(self) -> None:
         """거래 시작 직전 아데나와 픽셀 기준값을 저장하고 F7로 수락 준비를 합니다."""
         self.img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-        self.clear_f10_slot_if_needed()
         exchange_nickname = macro.readExchangeNickname(img=self.img)
         if not exchange_nickname:
             self.reset_exchange_window_tracking()
@@ -1104,7 +1091,6 @@ class IndependentHasteMacro:
     def handle_monitor_brightness_stage(self) -> None:
         """픽셀 변화와 슬롯 밝기를 함께 확인해 교환 OK 또는 ESC 취소를 결정합니다."""
         self.img = macro.screenshot()
-        self.clear_f10_slot_if_needed()
         exchange_nickname = macro.readExchangeNickname(self.img)
         if not exchange_nickname:
             self.reset_exchange_window_tracking()

@@ -95,7 +95,6 @@ int vkToHid(int vk) {
         case 0x76: return KEY_F7;
         case 0x77: return KEY_F8;
         case 0x78: return KEY_F9;
-        case 0x79: return KEY_F10;
         case 0x7A: return KEY_F11;
         case 0x7B: return KEY_F12;
 

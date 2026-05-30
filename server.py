@@ -26,9 +26,6 @@ PORT = 9999
 # server가 client에게 pickup 명령을 보낸 뒤 응답을 기다리는 최대 시간(초)입니다.
 ACK_TIMEOUT = 10
 
-# F10 슬롯 비우기는 키를 최대 30초 유지할 수 있어서 일반 ACK보다 길게 기다립니다.
-F10_CLEAR_ACK_TIMEOUT = 35
-
 # 같은 idx, 즉 같은 PC 안에서 서버/클라이언트 픽업 명령이 너무 붙지 않게 벌리는 시간(초)입니다.
 SAME_UNIT_DELAY = 0.5
 
@@ -295,50 +292,6 @@ def _send_restart(client: dict) -> bool:
         return False
 
 
-def _send_clear_f10(client: dict) -> bool:
-    """특정 클라이언트에게 F10 슬롯을 비우도록 명령하고 ack를 기다린다."""
-    if "conn" not in client:
-        return False
-
-    conn = client["conn"]
-    addr = client["addr"]
-    with client["lock"]:
-        print(f"[server] F10 슬롯 비우기 명령 전송 - client_idx={client.get('idx')}, addr={addr}")
-        if not _send_json(conn, {"cmd": "clear_f10"}):
-            _remove_client(client)
-            return False
-
-        conn.settimeout(F10_CLEAR_ACK_TIMEOUT)
-        resp = _recv_json(conn)
-        conn.settimeout(None)
-
-        if resp is None:
-            print(f"[server] F10 슬롯 비우기 응답 실패 - client_idx={client.get('idx')}, addr={addr}")
-            _remove_client(client)
-            return False
-
-        for line in resp.get("logs", []):
-            print(f"[client idx({client.get('idx')})] {line}")
-
-        if resp.get("status") == "ok":
-            print(
-                f"[server] F10 슬롯 비우기 응답 수신 - client_idx={client.get('idx')}, "
-                f"held_seconds={resp.get('held_seconds')}, addr={addr}"
-            )
-            return True
-
-        print(f"[server] F10 슬롯 비우기 응답 오류 - client_idx={client.get('idx')}, resp={resp}")
-        return False
-
-
-def _request_clients_clear_f10() -> None:
-    with _clients_lock:
-        clients_snapshot = [e for e in _clients if "conn" in e]
-
-    for client in clients_snapshot:
-        _send_clear_f10(client)
-
-
 def _request_restart_shutdown(
     source: str,
     *,
@@ -384,15 +337,6 @@ def _handle_restart_watcher_click() -> None:
     _request_restart_shutdown("watcher", click_server=False)
 
 
-def _clear_server_f10_slot_if_needed(img=None) -> bool:
-    held_seconds = macro.clear_f10_slot_if_occupied(img=img)
-    if held_seconds <= 0:
-        return False
-    print(f"[server] F10 슬롯 비우기 완료 - held_seconds={held_seconds:.1f}")
-    _request_clients_clear_f10()
-    return True
-
-
 def _handle_client(conn: socket.socket, addr: tuple):
     # 첫 메시지로 클라이언트가 보낸 idx 수신
     conn.settimeout(10)
@@ -417,7 +361,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
             with client["lock"]:
                 if not _send_json(conn, {"cmd": "ping"}):
                     break
-                conn.settimeout(F10_CLEAR_ACK_TIMEOUT)
+                conn.settimeout(ACK_TIMEOUT)
                 resp = _recv_json(conn)
                 conn.settimeout(None)
                 if resp is None:
@@ -933,8 +877,6 @@ def exchange_loop():
                 direction_synced = True
 
             img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-            if _clear_server_f10_slot_if_needed(img):
-                img = macro.screenshot(hwnd=macro.lineage1_hwnd)
             try:
                 _mp1 = macro.readMp(img)
             except macro.RestartButtonClicked:
@@ -1002,8 +944,6 @@ def exchange_loop():
                 if macro.turn_to(shop_direction):
                     print(f"[server] 장사 방향 유지 -> {shop_direction}")
                     img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-                    if _clear_server_f10_slot_if_needed(img):
-                        img = macro.screenshot(hwnd=macro.lineage1_hwnd)
 
             if time.time() - _last_type_string_time >= 10:
                 _ad_formats = [
@@ -1035,8 +975,6 @@ def exchange_loop():
                 if macro.turn_to(shop_direction, force=True):
                     print(f"[server] 장사 방향 주기 보정 -> {shop_direction}")
                     img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-                    if _clear_server_f10_slot_if_needed(img):
-                        img = macro.screenshot(hwnd=macro.lineage1_hwnd)
                 _last_shop_direction_force_time = time.time()
                 if _sleep_interruptible(0.2):
                     break
@@ -1216,8 +1154,6 @@ def exchange_loop():
         # ── Stage 3: 슬롯 밝기 감시 → 임계값 초과 시 교환 수락 ─────────────
         elif stage == MONITOR_BRIGHTNESS:
             img = macro.screenshot()
-            if _clear_server_f10_slot_if_needed(img):
-                img = macro.screenshot()
             exchange_nickname = macro.readExchangeNickname(img)
             if not exchange_nickname:
                 reset_exchange_window_tracking()

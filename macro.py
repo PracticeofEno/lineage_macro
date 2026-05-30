@@ -822,6 +822,17 @@ def monitor_chat():
             prev = text
         time.sleep(0.5)
 
+def readExp(img=None) -> str | None:
+    """
+    화면에서 EXP(경험치%) 텍스트를 읽어 반환한다.
+    예: '32.5158%'  |  읽기 실패 시 None
+    """
+    if img is None:
+        img = screenshot()
+    text = read_text(img, 129, 773, (255, 255, 255))
+    text = text.replace("%", "")
+    return text
+
 
 _DIRECTION_FUNCS = {
     'north': turn_north, 'northeast': turn_northeast,

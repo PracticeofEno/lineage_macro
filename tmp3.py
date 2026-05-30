@@ -1,44 +1,47 @@
 """
-tmp3.py - 드래그앤드롭 테스트
-source (x, y) → destinations[0..3] 순차 드래그앤드롭
+tmp_debug/ 의 det_N.png 와 mask_N.png 를 좌우로 합쳐 compare_N.png 로 저장.
 """
+import cv2
+import numpy as np
+from pathlib import Path
 
-import time
-import macro
+debug_dir = Path("tmp_debug")
+out_dir = Path("tmp_debug/compare")
+out_dir.mkdir(exist_ok=True)
 
+nums = sorted(
+    {p.stem.split("_")[1].replace(".png", "") for p in debug_dir.glob("det_*.png")},
+    key=lambda s: int(s.split(".")[0])
+)
 
-def arduino_drag_and_drop(x1: int, y1: int, x2: int, y2: int):
-    """(x1, y1)에서 (x2, y2)로 드래그앤드롭."""
-    macro._arduino_send(f'DD,{x1},{y1},{x2},{y2}')
+for n in nums:
+    det_path = debug_dir / f"det_{n}.png"
+    mask_path = debug_dir / f"mask_{n}.png"
 
+    det = cv2.imread(str(det_path))
+    mask = cv2.imread(str(mask_path))
 
-def drag_to_destinations(source: tuple[int, int], destinations: list[tuple[int, int]], delay: float = 0.5):
-    """source 좌표에서 destinations 각각으로 순차 드래그앤드롭."""
-    sx, sy = source
-    for i, (dx, dy) in enumerate(destinations):
-        print(f"[drag] {i+1}/{len(destinations)}: ({sx},{sy}) → ({dx},{dy})")
-        arduino_drag_and_drop(sx, sy, dx, dy)
-        time.sleep(delay)
+    if det is None or mask is None:
+        continue
 
+    # 마스크를 det 와 같은 높이/너비로 맞춤 (혹시 다를 경우 대비)
+    if mask.shape[:2] != det.shape[:2]:
+        mask = cv2.resize(mask, (det.shape[1], det.shape[0]))
 
-if __name__ == "__main__":
-    macro.init_setting("server")
-    macro.arduino_init_cursor()
-    time.sleep(0.5)
+    # 마스크에 라벨 추가
+    label_h = 28
+    def add_label(img, text):
+        labeled = np.zeros((img.shape[0] + label_h, img.shape[1], 3), dtype=np.uint8)
+        labeled[label_h:] = img
+        cv2.putText(labeled, text, (6, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (200, 200, 200), 1)
+        return labeled
 
-    # 드래그 출발지
-    source = (300, 400)
+    det_l = add_label(det, f"det_{n}.png")
+    mask_l = add_label(mask, f"mask_{n}.png")
 
-    # 드래그 목적지 4개
-    destinations = [
-        (500, 300),
-        (600, 400),
-        (500, 500),
-        (400, 400),
-    ]
+    combined = np.hstack([det_l, mask_l])
+    out_path = out_dir / f"compare_{n}.png"
+    cv2.imwrite(str(out_path), combined)
+    print(f"저장: {out_path}")
 
-    macro.force_set_foreground_window(macro.lineage1_hwnd)
-    time.sleep(0.3)
-
-    drag_to_destinations(source, destinations, delay=0.8)
-    print("[drag] 완료")
+print(f"\n총 {len(nums)}개 → {out_dir}/")

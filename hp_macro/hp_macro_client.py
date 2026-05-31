@@ -3,15 +3,16 @@ hp_macro_client.py - HP/MP 액션 클라이언트
   - 서버로부터 명령 수신 후 실행
   - hold_f5: F5 홀드 → 좌클릭
   - press_f8: F8 입력
+  - 자체 HP 감시: 임계치 이하 시 F5 2회 자힐
 """
 
-import argparse
 import json
 import socket
 import sys
 import time
 import threading
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -27,6 +28,17 @@ SERVER_PORT = 9997
 RECONNECT_DELAY = 5
 WINDOW_TITLE = "client"
 CLICK_INTERVAL = 0.5
+
+HP_PERCENT_THRESHOLD = 70.0
+HP_HEAL_COOLDOWN     = 3.0
+
+HP_READ: dict[str, Any] = {
+    "x": 976, "y": 71, "width": 80, "height": 21,
+    "color_rgb":      (247, 201, 227),
+    "x_offsets":      [0, 5, 10],
+    "text_x_offsets": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "text_y_offsets": [0, 1, 2, 3, 4, 5],
+}
 
 _recv_buffers: dict[socket.socket, bytes] = {}
 running = False
@@ -74,6 +86,46 @@ def _find_window(title: str) -> int:
         if t.startswith(title):
             return hwnd
     raise RuntimeError(f"window not found: {title}")
+
+
+def _read_stat_text(cfg: dict, img) -> str:
+    x, y  = int(cfg["x"]), int(cfg["y"])
+    w, h  = int(cfg["width"]), int(cfg["height"])
+    color = tuple(int(v) for v in cfg["color_rgb"])
+    best  = ""
+    for dx in cfg.get("x_offsets", [0]):
+        cropped = macro.crop(img, x + int(dx), y, w, h)
+        for ty in cfg.get("text_y_offsets", [0]):
+            for tx in cfg.get("text_x_offsets", [0]):
+                text = macro.read_text(cropped, int(tx), int(ty), color)
+                if len(text) > len(best):
+                    best = text
+    return best
+
+
+def _parse_stat(text: str) -> dict | None:
+    if "/" not in text:
+        return None
+    cur_str, max_str = text.split("/", 1)
+    cur_digits = "".join(c for c in cur_str if c.isdigit())
+    max_digits = "".join(c for c in max_str if c.isdigit())
+    if not cur_digits or not max_digits:
+        return None
+    current, maximum = int(cur_digits), int(max_digits)
+    if maximum <= 0:
+        return None
+    return {"current": current, "maximum": maximum, "percent": current / maximum * 100.0}
+
+
+def read_hp_state(img) -> dict | None:
+    return _parse_stat(_read_stat_text(HP_READ, img))
+
+
+def _self_heal() -> None:
+    macro.force_set_foreground_window(macro.lineage1_hwnd)
+    macro.arduino_key_press(win32con.VK_F5)
+    time.sleep(0.1)
+    macro.arduino_key_press(win32con.VK_F5)
 
 
 def _hold_f5_and_click(seconds: float) -> None:
@@ -180,7 +232,17 @@ def main() -> int:
                 _conn_thread = threading.Thread(target=_connect_loop, daemon=True)
                 _conn_thread.start()
                 print("[hp_macro_client] 연결 시작됨")
+                last_heal_time = 0.0
                 while running:
+                    now = time.time()
+                    img = macro.screenshot()
+                    hp_state = read_hp_state(img)
+                    if hp_state is not None and hp_state["percent"] < HP_PERCENT_THRESHOLD:
+                        if now - last_heal_time >= HP_HEAL_COOLDOWN:
+                            print(f"[hp_macro_client] HP {hp_state['percent']:.1f}% → F5 x2 자힐")
+                            _self_heal()
+                            last_heal_time = time.time()
+
                     if _hold_f5_active:
                         _hold_f5_and_click(0)
                         if _current_conn:

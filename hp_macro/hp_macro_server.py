@@ -305,8 +305,8 @@ def _bgr_screenshot() -> np.ndarray:
 
 def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25, step_delay: float = 0.01) -> None:
     """SetCursorPos로 이동, Arduino LP/DR로 좌버튼 누름/뗌."""
-    macro.force_set_foreground_window(macro.lineage1_hwnd)
-    time.sleep(0.3)
+    # macro.force_set_foreground_window(macro.lineage1_hwnd)
+    # time.sleep(0.3)
     win32api.SetCursorPos((x1, y1))
     time.sleep(0.1)
     macro.arduino_mouse_left_down()

@@ -306,10 +306,6 @@ def _press_f8_local() -> None:
 DRAG_TARGET_X = 616
 DRAG_TARGET_Y = 801
 
-# 기준좌표 이동: 내부 게임 좌표 추적
-_current_game_x: int = BASE_GAME_X
-_current_game_y: int = BASE_GAME_Y
-
 
 def _bgr_screenshot() -> np.ndarray:
     img_pil = macro.screenshot()
@@ -333,11 +329,17 @@ def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25, step_de
 
 
 def _move_toward_base() -> None:
-    """현재 추적 좌표에서 기준좌표 방향으로 WALK_TILES 타일 이동."""
-    global _current_game_x, _current_game_y
+    """read_location()으로 현재 좌표를 읽어 기준좌표 방향으로 WALK_TILES 타일 이동."""
+    macro.force_set_foreground_window(macro.lineage1_hwnd)
+    time.sleep(0.1)
+    loc = macro.read_location()
+    if not loc or loc == (0, 0):
+        print("[hp_macro_server] 좌표 읽기 실패, 이동 생략")
+        return
 
-    dx = BASE_GAME_X - _current_game_x
-    dy = BASE_GAME_Y - _current_game_y
+    cur_x, cur_y = loc
+    dx = BASE_GAME_X - cur_x
+    dy = BASE_GAME_Y - cur_y
 
     if dx == 0 and dy == 0:
         return
@@ -354,8 +356,9 @@ def _move_toward_base() -> None:
 
     print(
         f"[hp_macro_server] 기준좌표 이동:"
-        f" 현재=({_current_game_x},{_current_game_y})"
+        f" 현재=({cur_x},{cur_y})"
         f" → 목표=({BASE_GAME_X},{BASE_GAME_Y})"
+        f" dist={dist:.1f}"
         f" → 클릭=({screen_x},{screen_y})"
     )
 
@@ -363,9 +366,6 @@ def _move_toward_base() -> None:
     time.sleep(0.1)
     macro.arduino_mouse_click_left()
     time.sleep(0.5)
-
-    _current_game_x += step_dx
-    _current_game_y += step_dy
 
 
 def click_drag_monster(cx: int, cy: int) -> None:

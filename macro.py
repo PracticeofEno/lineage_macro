@@ -921,6 +921,19 @@ def readExp(img=None) -> str | None:
     return text
 
 
+def read_location() -> tuple[int, int] | None:
+    import re
+    arduino_type_string('/위치')
+    time.sleep(0.1)
+    img = screenshot()
+    color = (0xFF, 0xF1, 0xB5)
+    text = read_line_end(img, 328, 907, color)
+    m = re.search(r'\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)', text)
+    if m:
+        return (int(m.group(1)), int(m.group(2)))
+    return (0, 0)
+
+
 _DIRECTION_FUNCS = {
     'north': turn_north, 'northeast': turn_northeast,
     'east': turn_east, 'southeast': turn_southeast,

@@ -28,7 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import macro
-from tmp2 import detect_from_bgr
+from detect_pink_monster import detect as detect_pink_monsters
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -288,7 +288,7 @@ def _accept_loop(server_sock: socket.socket) -> None:
 
 _ov_lock  = threading.Lock()
 _ov_state: dict[str, Any] = {
-    "monsters":   [],    # list[dict] – 윈도우 상대좌표
+    "monsters":   [],    # list[dict] – 클라이언트 상대좌표
     "drag_start": None,  # (sx, sy) 절대좌표
     "drag_end":   None,  # (sx, sy) 절대좌표
     "last_click": None,  # (sx, sy) 절대좌표 (이동 클릭)
@@ -331,9 +331,37 @@ class ServerOverlay:
         self._canvas = tk.Canvas(self._root, bg="black", highlightthickness=0)
         self._canvas.pack(fill=tk.BOTH, expand=True)
 
+        self._root.update()
+        self._make_clickthrough()
+
         self._root.bind("<Escape>", lambda _: self._stop())
         self._refresh()
         self._root.mainloop()
+
+    def _make_clickthrough(self) -> None:
+        """Keep the overlay visible without receiving mouse/keyboard input."""
+        overlay_hwnd = win32gui.FindWindow(None, "hp_macro_overlay") or self._root.winfo_id()
+        ex_style = win32gui.GetWindowLong(overlay_hwnd, win32con.GWL_EXSTYLE)
+        ex_style |= (
+            win32con.WS_EX_TRANSPARENT
+            | win32con.WS_EX_NOACTIVATE
+            | win32con.WS_EX_TOOLWINDOW
+        )
+        win32gui.SetWindowLong(overlay_hwnd, win32con.GWL_EXSTYLE, ex_style)
+        win32gui.SetWindowPos(
+            overlay_hwnd,
+            win32con.HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            win32con.SWP_NOMOVE
+            | win32con.SWP_NOSIZE
+            | win32con.SWP_NOACTIVATE
+            | win32con.SWP_FRAMECHANGED,
+        )
+        self._root.attributes("-topmost", True)
+        self._root.attributes("-transparentcolor", "black")
 
     def _stop(self) -> None:
         self._running = False
@@ -357,10 +385,18 @@ class ServerOverlay:
             st = dict(_ov_state)
             monsters = list(st["monsters"])
 
-        # ── 몬스터 박스 (윈도우 상대좌표, 그대로 사용) ──────────
+        client_left, client_top = win32gui.ClientToScreen(self._hwnd, (0, 0))
+        client_dx = client_left - x0
+        client_dy = client_top - y0
+
+        # ── 몬스터 박스 (클라이언트 상대좌표 → 오버레이 상대좌표) ──
         for m in monsters:
             bx, by, bw, bh = m["bbox"]
             mx, my = m["center"]
+            bx += client_dx
+            by += client_dy
+            mx += client_dx
+            my += client_dy
             cv.create_rectangle(bx, by, bx + bw, by + bh, outline=self._BOX_COLOR, width=2)
             cv.create_oval(mx - 4, my - 4, mx + 4, my + 4, fill=self._DOT_COLOR, outline="")
             cv.create_text(bx + 2, by - 2, text=f"a={m['area']:.0f}",
@@ -407,7 +443,7 @@ class ServerOverlay:
         lines = [
             f"{hp_s}   {mp_s}",
             loc_s,
-            f"hunt={st['hunt_state']}  몬스터={len(monsters)}  [ESC] 종료",
+            f"hunt={st['hunt_state']}  몬스터={len(monsters)}  종료=콘솔 Ctrl+C",
         ]
         for i, line in enumerate(lines):
             cv.create_text(8, 8 + i * 17, text=line, fill=self._TEXT_COLOR,
@@ -440,11 +476,26 @@ def _press_f8_local() -> None:
 
 DRAG_TARGET_X = 616
 DRAG_TARGET_Y = 801
+MONSTER_DRAG_CLIENT_MARGIN = 6
+MONSTER_DRAG_CLIENT_TOP_MARGIN = 10
 
 
 def _bgr_screenshot() -> np.ndarray:
     img_pil = macro.screenshot()
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+
+
+def _detect_pink_monsters_for_overlay(img_bgr: np.ndarray) -> list[dict[str, Any]]:
+    monsters: list[dict[str, Any]] = []
+    for d in detect_pink_monsters(img_bgr):
+        x, y, w, h = int(d["x"]), int(d["y"]), int(d["w"]), int(d["h"])
+        cx, cy = int(d["cx"]), int(d["cy"])
+        monsters.append({
+            "center": (cx, cy),
+            "bbox": (x, y, w, h),
+            "area": int(d["area"]),
+        })
+    return monsters
 
 
 def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25, step_delay: float = 0.01) -> None:
@@ -453,17 +504,35 @@ def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25, step_de
     # macro.force_set_foreground_window(macro.lineage1_hwnd)
     # time.sleep(0.3)
     win32api.SetCursorPos((x1, y1))
-    time.sleep(0.3)
+    time.sleep(0.1)
     macro.arduino_mouse_left_down()
-    time.sleep(0.3)
-    win32api.SetCursorPos((x2, y2))
-    time.sleep(0.3)
+    time.sleep(0.1)
     for i in range(1, steps + 1):
         t = i / steps
         win32api.SetCursorPos((round(x1 + (x2 - x1) * t), round(y1 + (y2 - y1) * t)))
-        time.sleep(0.01)
+        time.sleep(0.001)
     macro.arduino_mouse_left_up()
-    time.sleep(0.3)
+    time.sleep(0.1)
+
+
+def _client_to_screen_xy(x: int, y: int) -> tuple[int, int]:
+    left, top = win32gui.ClientToScreen(macro.lineage1_hwnd, (0, 0))
+    return left + x, top + y
+
+
+def _client_screen_rect() -> tuple[int, int, int, int]:
+    left, top = win32gui.ClientToScreen(macro.lineage1_hwnd, (0, 0))
+    _client_left, _client_top, client_right, client_bottom = win32gui.GetClientRect(macro.lineage1_hwnd)
+    return left, top, left + client_right, top + client_bottom
+
+
+def _clamp_to_client_drag_area(x: int, y: int) -> tuple[int, int]:
+    left, top, right, bottom = _client_screen_rect()
+    min_x = left + MONSTER_DRAG_CLIENT_MARGIN
+    max_x = right - MONSTER_DRAG_CLIENT_MARGIN
+    min_y = top + MONSTER_DRAG_CLIENT_TOP_MARGIN
+    max_y = bottom - MONSTER_DRAG_CLIENT_MARGIN
+    return min(max(x, min_x), max_x), min(max(y, min_y), max_y)
 
 
 def _move_toward_base() -> None:
@@ -509,17 +578,25 @@ def _move_toward_base() -> None:
 
 def click_drag_monster(cx: int, cy: int) -> None:
     """몬스터 좌표(cx, cy)를 클릭 후 고정 좌표까지 드래그하고 버튼을 릴리스한다."""
-    print(f"[hp_macro_server] 드래그: ({cx},{cy}) → ({DRAG_TARGET_X},{DRAG_TARGET_Y})")
-    _setcursor_drag(cx, cy, DRAG_TARGET_X, DRAG_TARGET_Y)
+    screen_x, screen_y = _client_to_screen_xy(cx, cy)
+    safe_x, safe_y = _clamp_to_client_drag_area(screen_x, screen_y)
+    if (safe_x, safe_y) != (screen_x, screen_y):
+        print(
+            f"[hp_macro_server] 드래그 시작점 보정:"
+            f" client=({cx},{cy}) screen=({screen_x},{screen_y})"
+            f" → safe=({safe_x},{safe_y})"
+        )
+    print(f"[hp_macro_server] 드래그: ({safe_x},{safe_y}) → ({DRAG_TARGET_X},{DRAG_TARGET_Y})")
+    _setcursor_drag(safe_x, safe_y, DRAG_TARGET_X, DRAG_TARGET_Y)
 
 
 def _detect_monster() -> tuple[int, int] | None:
     """스크린샷에서 가장 큰 몬스터를 탐지하고 중심 좌표를 반환한다. 없으면 None."""
     try:
         img_bgr = _bgr_screenshot()
-        detected, monsters = detect_from_bgr(img_bgr)
-        _ov_update(monsters=monsters if detected else [])
-        if not detected or not monsters:
+        monsters = _detect_pink_monsters_for_overlay(img_bgr)
+        _ov_update(monsters=monsters)
+        if not monsters:
             return None
         biggest = max(monsters, key=lambda m: m['area'])
         return biggest['center']

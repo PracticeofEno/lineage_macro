@@ -45,9 +45,9 @@ TRIGGER_COOLDOWN_SECONDS = 2.5
 STATUS_INTERVAL_SECONDS  = 1.0
 PING_INTERVAL_SECONDS    = 5.0
 
-MONSTER_EXP_TIMEOUT   = 30.0   # EXP 변화 없으면 다음 몬스터 탐색까지 최대 대기 시간(초)
+MONSTER_EXP_TIMEOUT   = 15.0   # EXP 변화 없으면 다음 몬스터 탐색까지 최대 대기 시간(초)
 MONSTER_POLL_INTERVAL = 1.0    # EXP 폴링 간격(초)
-EXP_CHANGE_DELAY      = 1.0    # EXP 변화 후 idle 전환까지 대기 시간(초)
+EXP_CHANGE_DELAY      = 3.0    # EXP 변화 후 idle 전환까지 대기 시간(초)
 
 BASE_GAME_X     = 32779   # 귀환 기준 게임 좌표 X
 BASE_GAME_Y     = 33205   # 귀환 기준 게임 좌표 Y

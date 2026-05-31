@@ -49,6 +49,14 @@ MONSTER_EXP_TIMEOUT   = 30.0   # EXP 변화 없으면 다음 몬스터 탐색까
 MONSTER_POLL_INTERVAL = 1.0    # EXP 폴링 간격(초)
 EXP_CHANGE_DELAY      = 1.0    # EXP 변화 후 idle 전환까지 대기 시간(초)
 
+BASE_GAME_X     = 32779   # 귀환 기준 게임 좌표 X
+BASE_GAME_Y     = 33205   # 귀환 기준 게임 좌표 Y
+SCREEN_CENTER_X = 616     # 플레이어 화면 중심 X (절대좌표)
+SCREEN_CENTER_Y = 360     # 플레이어 화면 중심 Y (절대좌표, 십자선 기준)
+TILE_PX_X       = 40      # 1타일 이동 시 화면 X 변화량
+TILE_PX_Y       = 20      # 1타일 이동 시 화면 Y 변화량
+WALK_TILES      = 2       # EXP 변화 없을 때 한 번에 이동할 타일 수
+
 HP_READ: dict[str, Any] = {
     "x": 976, "y": 71, "width": 80, "height": 21,
     "color_rgb":       (247, 201, 227),
@@ -297,6 +305,10 @@ def _press_f8_local() -> None:
 DRAG_TARGET_X = 616
 DRAG_TARGET_Y = 801
 
+# 기준좌표 이동: 내부 게임 좌표 추적
+_current_game_x: int = BASE_GAME_X
+_current_game_y: int = BASE_GAME_Y
+
 
 def _bgr_screenshot() -> np.ndarray:
     img_pil = macro.screenshot()
@@ -317,6 +329,42 @@ def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25, step_de
         win32api.SetCursorPos((round(x1 + (x2 - x1) * t), round(y1 + (y2 - y1) * t)))
         time.sleep(0.001)
     macro.arduino_mouse_left_up()
+
+
+def _move_toward_base() -> None:
+    """현재 추적 좌표에서 기준좌표 방향으로 WALK_TILES 타일 이동."""
+    global _current_game_x, _current_game_y
+
+    dx = BASE_GAME_X - _current_game_x
+    dy = BASE_GAME_Y - _current_game_y
+
+    if dx == 0 and dy == 0:
+        return
+
+    dist = (dx * dx + dy * dy) ** 0.5
+    steps = min(WALK_TILES, max(1, round(dist)))
+
+    step_dx = round(dx / dist * steps)
+    step_dy = round(dy / dist * steps)
+
+    # Δsx = 40*(Δgx+Δgy),  Δsy = 20*(Δgy-Δgx)
+    screen_x = SCREEN_CENTER_X + (step_dx + step_dy) * TILE_PX_X
+    screen_y = SCREEN_CENTER_Y + (step_dy - step_dx) * TILE_PX_Y
+
+    print(
+        f"[hp_macro_server] 기준좌표 이동:"
+        f" 현재=({_current_game_x},{_current_game_y})"
+        f" → 목표=({BASE_GAME_X},{BASE_GAME_Y})"
+        f" → 클릭=({screen_x},{screen_y})"
+    )
+
+    win32api.SetCursorPos((screen_x, screen_y))
+    time.sleep(0.1)
+    macro.arduino_mouse_click_left()
+    time.sleep(0.5)
+
+    _current_game_x += step_dx
+    _current_game_y += step_dy
 
 
 def click_drag_monster(cx: int, cy: int) -> None:
@@ -466,7 +514,8 @@ def run() -> None:
                     hunt_exp_changed_at = time.time()
                     hunt_state = 'exp_changed'
                 elif elapsed >= MONSTER_EXP_TIMEOUT:
-                    print(f"[hp_macro_server] {MONSTER_EXP_TIMEOUT:.0f}초 EXP 변화 없음, 다음 몬스터 탐색")
+                    print(f"[hp_macro_server] {MONSTER_EXP_TIMEOUT:.0f}초 EXP 변화 없음, 기준좌표로 이동")
+                    _move_toward_base()
                     hunt_state = 'idle'
 
         elif hunt_state == 'exp_changed':

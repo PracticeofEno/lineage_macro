@@ -56,6 +56,7 @@ SCREEN_CENTER_Y = 360     # 플레이어 화면 중심 Y (절대좌표, 십자�
 TILE_PX_X       = 40      # 1타일 이동 시 화면 X 변화량
 TILE_PX_Y       = 20      # 1타일 이동 시 화면 Y 변화량
 WALK_TILES      = 2       # EXP 변화 없을 때 한 번에 이동할 타일 수
+MOVE_IF_NO_EXP_SECONDS = 30.0  # 이 시간 동안 EXP 변화 없으면 기준좌표로 이동
 
 HP_READ: dict[str, Any] = {
     "x": 976, "y": 71, "width": 80, "height": 21,
@@ -426,6 +427,11 @@ def run() -> None:
     last_periodic_f8     = 0.0
     last_exp_check       = 0.0
 
+    # 30초 EXP 무변화 이동 추적
+    last_exp_gain_time:  float      = time.time()
+    last_global_exp:     str | None = None
+    last_global_exp_poll: float     = 0.0
+
     # 몬스터 사냥 상태머신: 'idle' | 'hunting' | 'exp_changed'
     hunt_state:      str        = 'idle'
     hunt_prev_exp:   str | None = None
@@ -492,6 +498,22 @@ def run() -> None:
                 # HP 회복 직후 몬스터 재탐지
                 hunt_state = 'idle'
 
+        # ── 30초 EXP 무변화 → 기준좌표 이동 ──────────────────────────
+        if now - last_global_exp_poll >= MONSTER_POLL_INTERVAL:
+            last_global_exp_poll = now
+            g_exp = macro.readExp()
+            if last_global_exp is None:
+                last_global_exp    = g_exp
+                last_exp_gain_time = now
+            elif g_exp != last_global_exp:
+                last_global_exp    = g_exp
+                last_exp_gain_time = now
+
+        if now - last_exp_gain_time >= MOVE_IF_NO_EXP_SECONDS:
+            print(f"[hp_macro_server] {MOVE_IF_NO_EXP_SECONDS:.0f}초 EXP 변화 없음, 기준좌표로 이동")
+            _move_toward_base()
+            last_exp_gain_time = time.time()
+
         # ── 몬스터 사냥 상태머신 ───────────────────────────────────
         if hunt_state == 'idle':
             pos = _detect_monster()
@@ -514,8 +536,7 @@ def run() -> None:
                     hunt_exp_changed_at = time.time()
                     hunt_state = 'exp_changed'
                 elif elapsed >= MONSTER_EXP_TIMEOUT:
-                    print(f"[hp_macro_server] {MONSTER_EXP_TIMEOUT:.0f}초 EXP 변화 없음, 기준좌표로 이동")
-                    _move_toward_base()
+                    print(f"[hp_macro_server] {MONSTER_EXP_TIMEOUT:.0f}초 EXP 변화 없음, 다음 몬스터 탐색")
                     hunt_state = 'idle'
 
         elif hunt_state == 'exp_changed':

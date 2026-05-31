@@ -31,6 +31,7 @@ CLICK_INTERVAL = 0.5
 
 HP_PERCENT_THRESHOLD = 70.0
 HP_HEAL_COOLDOWN     = 3.0
+F8_INTERVAL_SECONDS  = 600.0
 
 HP_READ: dict[str, Any] = {
     "x": 976, "y": 71, "width": 80, "height": 21,
@@ -233,6 +234,7 @@ def main() -> int:
                 _conn_thread.start()
                 print("[hp_macro_client] 연결 시작됨")
                 last_heal_time = 0.0
+                last_f8_time   = 0.0
                 while running:
                     now = time.time()
                     img = macro.screenshot()
@@ -242,6 +244,11 @@ def main() -> int:
                             print(f"[hp_macro_client] HP {hp_state['percent']:.1f}% → F5 x2 자힐")
                             _self_heal()
                             last_heal_time = time.time()
+
+                    if now - last_f8_time >= F8_INTERVAL_SECONDS:
+                        print(f"[hp_macro_client] 10분 주기 F8")
+                        _press_f8()
+                        last_f8_time = time.time()
 
                     if _hold_f5_active:
                         _hold_f5_and_click(0)

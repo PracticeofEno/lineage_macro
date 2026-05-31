@@ -39,7 +39,8 @@ HP_PERCENT_THRESHOLD     = 70.0
 MP_PERCENT_THRESHOLD     = 10.0
 POLL_INTERVAL_SECONDS    = 0.2
 F5_HOLD_SECONDS          = 1.0
-F8_COOLDOWN_SECONDS      = 600.0
+F8_COOLDOWN_SECONDS      = 1800.0
+F8_INTERVAL_SECONDS      = 1800.0
 TRIGGER_COOLDOWN_SECONDS = 2.5
 STATUS_INTERVAL_SECONDS  = 1.0
 PING_INTERVAL_SECONDS    = 5.0
@@ -283,6 +284,11 @@ def _hold_f5(seconds: float) -> None:
         macro.arduino_key_up(win32con.VK_F5)
 
 
+def _press_f8_local() -> None:
+    macro.force_set_foreground_window(macro.lineage1_hwnd)
+    macro.arduino_key_press(win32con.VK_F8)
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 몬스터 탐지 및 공격
 # ═══════════════════════════════════════════════════════════════════
@@ -365,10 +371,11 @@ def _fmt_stat(name: str, state: dict | None) -> str:
 
 
 def run() -> None:
-    last_trigger_time = 0.0
-    last_status_time  = 0.0
-    last_f8_time      = 0.0
-    last_exp_check    = 0.0
+    last_trigger_time    = 0.0
+    last_status_time     = 0.0
+    last_f8_time         = 0.0
+    last_periodic_f8     = 0.0
+    last_exp_check       = 0.0
 
     # 몬스터 사냥 상태머신: 'idle' | 'hunting'
     hunt_state:    str       = 'idle'
@@ -396,6 +403,12 @@ def run() -> None:
             print(f"[hp_macro_server] {_fmt_stat('HP', hp_state)}, {_fmt_stat('MP', mp_state)}"
                   f"  hunt={hunt_state}")
             last_status_time = now
+
+        # ── 주기적 F8 (서버 로컬) ─────────────────────────────────
+        if now - last_periodic_f8 >= F8_INTERVAL_SECONDS:
+            print(f"[hp_macro_server] {F8_INTERVAL_SECONDS:.0f}초 주기 F8")
+            _press_f8_local()
+            last_periodic_f8 = time.time()
 
         # ── MP 체크 ────────────────────────────────────────────────
         if mp_state is not None:

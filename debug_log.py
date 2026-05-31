@@ -9,19 +9,23 @@ from inspect import signature
 from time import perf_counter
 from typing import Any, Callable
 
+import config
+
 
 _original_print = builtins.print
 _original_excepthook = sys.excepthook
 _original_threading_excepthook = getattr(threading, "excepthook", None)
 
+
 _logger: logging.Logger | None = None
 _log_path: str | None = None
 _configured = False
-_socket_verbose = os.environ.get("LINEAGE_LOG_SOCKET_VERBOSE") == "1"
+_logging_enabled = config.get_bool("logging.enabled", True)
+_socket_verbose = _logging_enabled
 _MAX_FIELD_REPR = 800
 
 
-def setup(role: str) -> str:
+def _setup(role: str) -> str:
     global _logger, _log_path, _configured
 
     if _configured and _log_path:
@@ -88,15 +92,15 @@ def setup(role: str) -> str:
     return _log_path
 
 
-def setup_process(role: str, **fields: Any) -> str:
+def _setup_process(role: str, **fields: Any) -> str:
     """Set up logging and emit the standard process-start boundary once."""
-    log_path = setup(role)
+    log_path = _setup(role)
     print(f"[{role}] 로그 파일: {log_path}")
     event(f"{role}_process_start", **fields)
     return log_path
 
 
-def event(name: str, **fields: Any) -> None:
+def _event(name: str, **fields: Any) -> None:
     if _logger is None:
         return
     if not fields:
@@ -164,7 +168,7 @@ def _trace_fields(sig: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> di
     return {key: _summarize(value) for key, value in bound.arguments.items()}
 
 
-def trace(func: Callable[..., Any]):
+def _trace(func: Callable[..., Any]):
     sig = signature(func)
     event_name = func.__name__
 
@@ -185,3 +189,25 @@ def trace(func: Callable[..., Any]):
         return value
 
     return wrapper
+
+
+def _dummy_setup_process(role: str, **fields: Any) -> None:
+    return None
+
+
+def _dummy_event(name: str, **fields: Any) -> None:
+    pass
+
+
+def _dummy_trace(func: Callable[..., Any]):
+    return func
+
+
+if _logging_enabled:
+    setup_process = _setup_process
+    event = _event
+    trace = _trace
+else:
+    setup_process = _dummy_setup_process
+    event = _dummy_event
+    trace = _dummy_trace

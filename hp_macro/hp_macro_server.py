@@ -677,8 +677,9 @@ def run() -> None:
                     hunt_exp_changed_at = time.time()
                     hunt_state = 'exp_changed'
                 elif elapsed >= MONSTER_EXP_TIMEOUT:
-                    print(f"[hp_macro_server] {MONSTER_EXP_TIMEOUT:.0f}초 EXP 변화 없음, 다음 몬스터 탐색")
-                    hunt_state = 'idle'
+                    print(f"[hp_macro_server] {MONSTER_EXP_TIMEOUT:.0f}초 EXP 변화 없음, {EXP_CHANGE_DELAY:.0f}초 후 다음 몬스터 탐색")
+                    hunt_exp_changed_at = time.time()
+                    hunt_state = 'exp_changed'
 
         elif hunt_state == 'exp_changed':
             if now - hunt_exp_changed_at >= EXP_CHANGE_DELAY:

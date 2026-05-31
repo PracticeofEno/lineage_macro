@@ -52,7 +52,7 @@ EXP_CHANGE_DELAY      = 3.0    # EXP 변화 후 idle 전환까지 대기 시간(
 
 BASE_GAME_X     = 32779   # 귀환 기준 게임 좌표 X
 BASE_GAME_Y     = 33205   # 귀환 기준 게임 좌표 Y
-SCREEN_CENTER_X = 616     # 플레이어 화면 중심 X (절대좌표)
+SCREEN_CENTER_X = 626     # 플레이어 화면 중심 X (절대좌표)
 SCREEN_CENTER_Y = 360     # 플레이어 화면 중심 Y (절대좌표, 십자선 기준)
 TILE_PX_X       = 40      # 1타일 이동 시 화면 X 변화량
 TILE_PX_Y       = 20      # 1타일 이동 시 화면 Y 변화량
@@ -500,7 +500,7 @@ def _move_toward_base() -> None:
 
     _ov_update(location=loc, last_click=(screen_x, screen_y))
     win32api.SetCursorPos((screen_x, screen_y))
-    time.sleep(0.1)
+    time.sleep(0.5)
     macro.arduino_mouse_click_left()
     time.sleep(0.5)
 

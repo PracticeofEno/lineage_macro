@@ -8,3 +8,4 @@ logs/
 *.json.tmp
 ctrl_state.lock
 potion_state.lock
+codex_hud_handoff_20260531/

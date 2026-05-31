@@ -730,6 +730,160 @@ def readMp(img=None) -> int:
     return 0
 
 
+_HUD_LEFT = 655
+_HUD_WIDTH = 190
+_HUD_HEIGHT = 34
+_HUD_TOP_TO_CHAT_LINES = {655: 8, 703: 6, 751: 4}
+_HUD_TOPS = tuple(_HUD_TOP_TO_CHAT_LINES)
+_HUD_LOCATOR_TOLERANCE = 12
+_HUD_DIGIT_TEMPLATE_PATH = os.path.join(_BASE, "hud_mp_digit_template.json")
+_HUD_MP_MAX_SCORE = 0.15
+_hud_digit_template_cache: dict | None = None
+_last_hud_top: int | None = None
+
+
+_HUD_LOCATOR_ROIS = (
+    (
+        {"x": 233, "y_rel": 13, "rgb": (236, 219, 189)},
+        {"x": 263, "y_rel": 38, "rgb": (23, 27, 29)},
+    ),
+    (
+        {"x": 971, "y_rel": 60, "rgb": (248, 248, 248)},
+        {"x": 964, "y_rel": 66, "rgb": (224, 224, 232)},
+    ),
+)
+
+
+def _load_hud_digit_template() -> dict:
+    global _hud_digit_template_cache
+    if _hud_digit_template_cache is not None:
+        return _hud_digit_template_cache
+    try:
+        with open(_HUD_DIGIT_TEMPLATE_PATH, encoding="utf-8") as f:
+            _hud_digit_template_cache = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"HUD MP 템플릿을 읽을 수 없습니다: {_HUD_DIGIT_TEMPLATE_PATH}") from exc
+    return _hud_digit_template_cache
+
+
+def _hud_roi_matches(pixels, top: int, roi: tuple[dict, ...]) -> bool:
+    for sentinel in roi:
+        x = int(sentinel["x"])
+        y = top + int(sentinel["y_rel"])
+        try:
+            r, g, b = pixels[x, y]
+        except IndexError:
+            return False
+        expected_r, expected_g, expected_b = sentinel["rgb"]
+        if max(abs(int(r) - expected_r), abs(int(g) - expected_g), abs(int(b) - expected_b)) > _HUD_LOCATOR_TOLERANCE:
+            return False
+    return True
+
+
+def _hud_top_matches(pixels, top: int) -> bool:
+    return any(_hud_roi_matches(pixels, top, roi) for roi in _HUD_LOCATOR_ROIS)
+
+
+def _hud_find_top(img: Image.Image) -> int | None:
+    global _last_hud_top
+    pixels = img.convert("RGB").load()
+    candidates = []
+    if _last_hud_top in _HUD_TOPS:
+        candidates.append(_last_hud_top)
+    candidates.extend(top for top in _HUD_TOPS if top not in candidates)
+
+    for top in candidates:
+        if _hud_top_matches(pixels, top):
+            _last_hud_top = top
+            return top
+    return None
+
+
+def _hud_crop_box(img: Image.Image) -> tuple[int, int, int, int] | None:
+    top = _hud_find_top(img)
+    if top is None:
+        return None
+    return (_HUD_LEFT, top, _HUD_LEFT + _HUD_WIDTH, top + _HUD_HEIGHT)
+
+
+def _hud_cell_mask(hud_img: Image.Image, template_data: dict, x: int) -> list[float]:
+    cell = template_data.get("cell") or {}
+    threshold = template_data.get("threshold") or {}
+    top = int(cell.get("top", 8))
+    width = int(cell.get("width", 10))
+    height = int(cell.get("height", 23))
+    rgb = hud_img.convert("RGB")
+    pixels = rgb.load()
+    values: list[float] = []
+    for yy in range(height):
+        for xx in range(width):
+            px = x + xx
+            py = top + yy
+            if px < 0 or py < 0 or px >= rgb.width or py >= rgb.height:
+                values.append(0.0)
+                continue
+            r, g, b = pixels[px, py]
+            luma = (int(r) + int(g) + int(b)) // 3
+            on = luma > int(threshold.get("luma_gt", -1))
+            on = on and int(b) > int(threshold.get("b_gt", -1))
+            on = on and (int(b) - int(r)) > int(threshold.get("b_minus_r_gt", -999))
+            on = on and (int(b) - int(g)) > int(threshold.get("b_minus_g_gt", -999))
+            values.append(1.0 if on else 0.0)
+    return values
+
+
+def _hud_score(values: list[float], template: list[float]) -> float:
+    if not values or len(values) != len(template):
+        return float("inf")
+    return sum(abs(float(value) - float(ref)) for value, ref in zip(values, template)) / len(values)
+
+
+def _read_hud_mp(hud_img: Image.Image) -> int:
+    template_data = _load_hud_digit_template()
+    if not template_data:
+        raise RuntimeError("HUD MP 템플릿이 비어 있습니다")
+    templates = template_data.get("templates") or {}
+    cell = template_data.get("cell") or {}
+    left = int(cell.get("left", 62))
+    width = int(cell.get("width", 10))
+    value_min = int(cell.get("value_min", 0))
+    value_max = int(cell.get("value_max", 130))
+    slash_weight = float(template_data.get("slash_weight", 1.5))
+    if not ({str(value) for value in range(10)} | {"/"}).issubset(templates):
+        raise RuntimeError("HUD MP 템플릿에 필요한 숫자 또는 / 패턴이 없습니다")
+
+    cell_cache: dict[int, list[float]] = {}
+
+    def cell_at(index: int) -> list[float]:
+        x = left + index * width
+        if x not in cell_cache:
+            cell_cache[x] = _hud_cell_mask(hud_img, template_data, x)
+        return cell_cache[x]
+
+    best_value = None
+    best_score = float("inf")
+    for value in range(value_min, value_max + 1):
+        text = str(value)
+        scores = [_hud_score(cell_at(index), templates[digit]) for index, digit in enumerate(text)]
+        scores.append(_hud_score(cell_at(len(text)), templates["/"]) * slash_weight)
+        score = sum(scores) / len(scores)
+        if score < best_score:
+            best_value = value
+            best_score = score
+    if best_value is None or best_score > _HUD_MP_MAX_SCORE:
+        raise RuntimeError(f"HUD MP 판독 신뢰도가 낮습니다: score={best_score:.5f} > {_HUD_MP_MAX_SCORE}")
+    return best_value
+
+
+def readMp2(img=None) -> int:
+    if img is None:
+        img = screenshot()
+    hud_box = _hud_crop_box(img)
+    if hud_box is None:
+        raise RuntimeError("HUD 위치를 찾지 못했습니다")
+    return _read_hud_mp(img.crop(hud_box))
+
+
 def readAdena() -> int:
     force_set_foreground_window(lineage1_hwnd)
     while True:

@@ -1,7 +1,7 @@
 """
 client.py - Pickup 클라이언트
   - 서버에 TCP 연결 후 명령 수신
-  - ping 수신 시 readMp()로 마나 측정 후 pong 응답
+  - ping 수신 시 readMp2()로 마나 측정 후 pong 응답
   - "pickup" 명령 수신 시 pickup_lineage1() 실행
   - "reset_target" 수신 시 target_locked 리셋
   - 소켓 끊김 시 자동 재연결 시도
@@ -66,7 +66,7 @@ def _handle_command(msg: dict) -> dict | None:
     req_id = msg.get("req_id")
 
     if cmd == "ping":
-        mp = macro.readMp()
+        mp = macro.readMp2()
         if mp != _last_ping_mp:
             print(f"[client] ping 수신 → MP: {mp}")
             _last_ping_mp = mp

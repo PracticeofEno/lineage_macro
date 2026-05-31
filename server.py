@@ -320,9 +320,8 @@ def exchange_loop():
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
             img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-            _mp1 = macro.readMp(img)
-            if _mp1 != 0:
-                macro.mp_1 = _mp1
+            _mp1 = macro.readMp2(img)
+            macro.mp_1 = _mp1
 
             with _clients_lock:
                 for e in _clients:

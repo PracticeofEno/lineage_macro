@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import tkinter as tk
 import numpy as np
 import win32api
 import win32con
@@ -282,6 +283,140 @@ def _accept_loop(server_sock: socket.socket) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 오버레이 공유 상태 (thread-safe)
+# ═══════════════════════════════════════════════════════════════════
+
+_ov_lock  = threading.Lock()
+_ov_state: dict[str, Any] = {
+    "monsters":   [],    # list[dict] – 윈도우 상대좌표
+    "drag_start": None,  # (sx, sy) 절대좌표
+    "drag_end":   None,  # (sx, sy) 절대좌표
+    "last_click": None,  # (sx, sy) 절대좌표 (이동 클릭)
+    "hp_state":   None,
+    "mp_state":   None,
+    "hunt_state": "idle",
+    "location":   None,  # (gx, gy) 게임 좌표
+}
+
+
+def _ov_update(**kw: Any) -> None:
+    with _ov_lock:
+        _ov_state.update(kw)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 오버레이 UI (tkinter, 메인 스레드에서 실행)
+# ═══════════════════════════════════════════════════════════════════
+
+class ServerOverlay:
+    _BOX_COLOR    = "#00FF00"
+    _DOT_COLOR    = "red"
+    _TEXT_COLOR   = "#FFFF00"
+    _CENTER_COLOR = "#00CFFF"
+    _CLICK_COLOR  = "#FF8800"
+    _DRAG_COLOR   = "#FF44FF"
+    _CENTER_SIZE  = 16
+
+    def __init__(self, hwnd: int) -> None:
+        self._hwnd    = hwnd
+        self._running = True
+
+        self._root = tk.Tk()
+        self._root.title("hp_macro_overlay")
+        self._root.overrideredirect(True)
+        self._root.attributes("-topmost", True)
+        self._root.attributes("-transparentcolor", "black")
+        self._root.configure(bg="black")
+
+        self._canvas = tk.Canvas(self._root, bg="black", highlightthickness=0)
+        self._canvas.pack(fill=tk.BOTH, expand=True)
+
+        self._root.bind("<Escape>", lambda _: self._stop())
+        self._refresh()
+        self._root.mainloop()
+
+    def _stop(self) -> None:
+        self._running = False
+        self._root.quit()
+
+    def _refresh(self) -> None:
+        if not self._running:
+            return
+        try:
+            x0, y0, x1, y1 = win32gui.GetWindowRect(self._hwnd)
+        except Exception:
+            self._stop()
+            return
+
+        w, h = x1 - x0, y1 - y0
+        self._root.geometry(f"{w}x{h}+{x0}+{y0}")
+        cv = self._canvas
+        cv.delete("all")
+
+        with _ov_lock:
+            st = dict(_ov_state)
+            monsters = list(st["monsters"])
+
+        # ── 몬스터 박스 (윈도우 상대좌표, 그대로 사용) ──────────
+        for m in monsters:
+            bx, by, bw, bh = m["bbox"]
+            mx, my = m["center"]
+            cv.create_rectangle(bx, by, bx + bw, by + bh, outline=self._BOX_COLOR, width=2)
+            cv.create_oval(mx - 4, my - 4, mx + 4, my + 4, fill=self._DOT_COLOR, outline="")
+            cv.create_text(bx + 2, by - 2, text=f"a={m['area']:.0f}",
+                           fill=self._TEXT_COLOR, anchor="sw", font=("Consolas", 9))
+
+        # ── 드래그 선 (절대 → 캔버스 상대) ─────────────────────
+        ds, de = st["drag_start"], st["drag_end"]
+        if ds and de:
+            dsx, dsy = ds[0] - x0, ds[1] - y0
+            dex, dey = de[0] - x0, de[1] - y0
+            cv.create_line(dsx, dsy, dex, dey, fill=self._DRAG_COLOR, width=2, dash=(5, 3))
+            cv.create_oval(dsx - 5, dsy - 5, dsx + 5, dsy + 5, outline=self._DRAG_COLOR, width=2)
+            cv.create_oval(dex - 5, dey - 5, dex + 5, dey + 5, fill=self._DRAG_COLOR, outline="")
+            cv.create_text(dex + 8, dey, text=f"({de[0]},{de[1]})",
+                           fill=self._DRAG_COLOR, anchor="w", font=("Consolas", 9))
+
+        # ── 이동 클릭 마커 (절대 → 캔버스 상대) ────────────────
+        lc = st["last_click"]
+        if lc:
+            lcx, lcy = lc[0] - x0, lc[1] - y0
+            r = 9
+            cv.create_oval(lcx - r, lcy - r, lcx + r, lcy + r, outline=self._CLICK_COLOR, width=2)
+            cv.create_line(lcx - r - 4, lcy, lcx + r + 4, lcy, fill=self._CLICK_COLOR, width=1)
+            cv.create_line(lcx, lcy - r - 4, lcx, lcy + r + 4, fill=self._CLICK_COLOR, width=1)
+            cv.create_text(lcx + r + 6, lcy, text=f"이동({lc[0]},{lc[1]})",
+                           fill=self._CLICK_COLOR, anchor="w", font=("Consolas", 9))
+
+        # ── 플레이어 중심 십자선 (절대 → 캔버스 상대) ───────────
+        px = SCREEN_CENTER_X - x0
+        py = SCREEN_CENTER_Y - y0
+        s  = self._CENTER_SIZE
+        cv.create_line(px - s, py, px + s, py, fill=self._CENTER_COLOR, width=2)
+        cv.create_line(px, py - s, px, py + s, fill=self._CENTER_COLOR, width=2)
+        cv.create_oval(px - 3, py - 3, px + 3, py + 3, outline=self._CENTER_COLOR, width=2)
+        cv.create_text(px + s + 4, py, text=f"({SCREEN_CENTER_X},{SCREEN_CENTER_Y})",
+                       fill=self._CENTER_COLOR, anchor="w", font=("Consolas", 9))
+
+        # ── 상태 텍스트 (좌상단) ─────────────────────────────────
+        hp, mp, loc = st["hp_state"], st["mp_state"], st["location"]
+        hp_s  = f"HP {hp['current']}/{hp['maximum']} ({hp['percent']:.1f}%)" if hp else "HP --"
+        mp_s  = f"MP {mp['current']}/{mp['maximum']} ({mp['percent']:.1f}%)" if mp else "MP --"
+        loc_s = (f"위치({loc[0]},{loc[1]}) → 목표({BASE_GAME_X},{BASE_GAME_Y})"
+                 if loc else f"위치 -- → 목표({BASE_GAME_X},{BASE_GAME_Y})")
+        lines = [
+            f"{hp_s}   {mp_s}",
+            loc_s,
+            f"hunt={st['hunt_state']}  몬스터={len(monsters)}  [ESC] 종료",
+        ]
+        for i, line in enumerate(lines):
+            cv.create_text(8, 8 + i * 17, text=line, fill=self._TEXT_COLOR,
+                           anchor="nw", font=("Consolas", 10, "bold"))
+
+        self._root.after(100, self._refresh)
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 로컬 액션
 # ═══════════════════════════════════════════════════════════════════
 
@@ -314,6 +449,7 @@ def _bgr_screenshot() -> np.ndarray:
 
 def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25, step_delay: float = 0.01) -> None:
     """SetCursorPos로 이동, Arduino LP/DR로 좌버튼 누름/뗌."""
+    _ov_update(drag_start=(x1, y1), drag_end=(x2, y2))
     # macro.force_set_foreground_window(macro.lineage1_hwnd)
     # time.sleep(0.3)
     win32api.SetCursorPos((x1, y1))
@@ -362,6 +498,7 @@ def _move_toward_base() -> None:
         f" → 클릭=({screen_x},{screen_y})"
     )
 
+    _ov_update(location=loc, last_click=(screen_x, screen_y))
     win32api.SetCursorPos((screen_x, screen_y))
     time.sleep(0.1)
     macro.arduino_mouse_click_left()
@@ -379,12 +516,14 @@ def _detect_monster() -> tuple[int, int] | None:
     try:
         img_bgr = _bgr_screenshot()
         detected, monsters = detect_from_bgr(img_bgr)
+        _ov_update(monsters=monsters if detected else [])
         if not detected or not monsters:
             return None
         biggest = max(monsters, key=lambda m: m['area'])
         return biggest['center']
     except Exception as e:
         print(f"[hp_macro_server] 몬스터 탐지 오류: {e}")
+        _ov_update(monsters=[])
         return None
 
 
@@ -453,6 +592,8 @@ def run() -> None:
         hp_state = read_hp_state(img)
         mp_state = read_mp_state(img)
         now      = time.time()
+
+        _ov_update(hp_state=hp_state, mp_state=mp_state, hunt_state=hunt_state)
 
         # ── 상태 출력 ──────────────────────────────────────────────
         if now - last_status_time >= STATUS_INTERVAL_SECONDS:
@@ -577,7 +718,8 @@ def main() -> int:
     threading.Thread(target=_input_loop, daemon=True).start()
 
     try:
-        run()
+        threading.Thread(target=run, daemon=True).start()
+        ServerOverlay(macro.lineage1_hwnd)
     except KeyboardInterrupt:
         print("\n[hp_macro_server] 종료")
     finally:

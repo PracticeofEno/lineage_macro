@@ -47,6 +47,7 @@ PING_INTERVAL_SECONDS    = 5.0
 
 MONSTER_EXP_TIMEOUT   = 30.0   # EXP 변화 없으면 다음 몬스터 탐색까지 최대 대기 시간(초)
 MONSTER_POLL_INTERVAL = 1.0    # EXP 폴링 간격(초)
+EXP_CHANGE_DELAY      = 1.0    # EXP 변화 후 idle 전환까지 대기 시간(초)
 
 HP_READ: dict[str, Any] = {
     "x": 976, "y": 71, "width": 80, "height": 21,
@@ -377,10 +378,11 @@ def run() -> None:
     last_periodic_f8     = 0.0
     last_exp_check       = 0.0
 
-    # 몬스터 사냥 상태머신: 'idle' | 'hunting'
-    hunt_state:    str       = 'idle'
-    hunt_prev_exp: str | None = None
-    hunt_start:    float     = 0.0
+    # 몬스터 사냥 상태머신: 'idle' | 'hunting' | 'exp_changed'
+    hunt_state:      str        = 'idle'
+    hunt_prev_exp:   str | None = None
+    hunt_start:      float      = 0.0
+    hunt_exp_changed_at: float  = 0.0
 
     print(
         f"[hp_macro_server] start"
@@ -460,11 +462,16 @@ def run() -> None:
                 curr_exp = macro.readExp()
                 elapsed  = now - hunt_start
                 if curr_exp != hunt_prev_exp:
-                    print(f"[hp_macro_server] EXP 변화: {hunt_prev_exp} → {curr_exp}, 다음 몬스터 탐색")
-                    hunt_state = 'idle'
+                    print(f"[hp_macro_server] EXP 변화: {hunt_prev_exp} → {curr_exp}, {EXP_CHANGE_DELAY:.0f}초 후 다음 몬스터 탐색")
+                    hunt_exp_changed_at = time.time()
+                    hunt_state = 'exp_changed'
                 elif elapsed >= MONSTER_EXP_TIMEOUT:
                     print(f"[hp_macro_server] {MONSTER_EXP_TIMEOUT:.0f}초 EXP 변화 없음, 다음 몬스터 탐색")
                     hunt_state = 'idle'
+
+        elif hunt_state == 'exp_changed':
+            if now - hunt_exp_changed_at >= EXP_CHANGE_DELAY:
+                hunt_state = 'idle'
 
         time.sleep(POLL_INTERVAL_SECONDS)
 

@@ -107,7 +107,7 @@ def _handle_command(msg: dict) -> dict | None:
         return {"status": "ok", "req_id": req_id}
 
     if cmd == "hold_f5":
-        _hold_f5_active = True
+        _hold_f5_and_click(msg.get("seconds", 1.0))
         return {"status": "ok", "req_id": req_id}
 
     if cmd == "press_f8":

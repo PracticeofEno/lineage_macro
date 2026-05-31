@@ -419,13 +419,13 @@ def run() -> None:
                     daemon=True,
                 )
                 t.start()
+                last_trigger_time = time.time()
 
             if hp_low and trigger_ready:
                 print(f"[hp_macro_server] HP {hp_state['percent']:.1f}% < {HP_PERCENT_THRESHOLD:.1f}% → hold_f5 {F5_HOLD_SECONDS}s")
-                
                 _hold_f5(F5_HOLD_SECONDS)
-                t.join()
-                last_trigger_time = time.time()
+                if client_trigger:
+                    t.join()
                 # HP 회복 직후 몬스터 재탐지
                 hunt_state = 'idle'
 

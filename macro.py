@@ -16,6 +16,8 @@ from ctypes import windll
 from datetime import datetime
 from PIL import Image
 
+import debug_log
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hangul
@@ -348,6 +350,7 @@ def arduino_init_cursor():
     _arduino_send('INIT')
 
 
+@debug_log.trace
 def apply_coord_delta(dx: int, dy: int):
     """서버 방향 전환 시 픽업 좌표를 이동시킨다."""
     _mouse_xy[0] += dx
@@ -355,6 +358,7 @@ def apply_coord_delta(dx: int, dy: int):
     print(f"[macro] 좌표 이동 적용: dx={dx:+}, dy={dy:+} → {_mouse_xy}")
 
 
+@debug_log.trace
 def reset_coord():
     """픽업 좌표를 config 초기값으로 되돌린다."""
     with open("macro_data.json", encoding="utf-8") as f:
@@ -662,12 +666,14 @@ def shake_mouse_small(count=10, dist=10, delay=0.05):
         arduino_mouse_move_rel(-dist, 0) # 왼쪽으로 2
         time.sleep(delay)
 
+@debug_log.trace
 def use_potion():
     force_set_foreground_window(lineage1_hwnd)
     time.sleep(0.5)
     _arduino_send(f'KP,{win32con.VK_F8}')
 
 
+@debug_log.trace
 def pickup_lineage1(target_nickname: str | None = None):
     x, y = _mouse_xy
     force_set_foreground_window(lineage1_hwnd)

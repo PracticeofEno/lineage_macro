@@ -15,6 +15,7 @@ import win32api
 import win32con
 import win32gui
 
+import debug_log
 import macro
 
 HOST = '0.0.0.0'
@@ -38,6 +39,7 @@ running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
 _server_running = True  # accept 루프 제어 (q 입력 시에만 False)
 
 
+@debug_log.trace
 def _send_json(conn: socket.socket, obj: dict) -> bool:
     try:
         conn.sendall((json.dumps(obj) + '\n').encode())
@@ -46,6 +48,7 @@ def _send_json(conn: socket.socket, obj: dict) -> bool:
         return False
 
 
+@debug_log.trace
 def _recv_json(conn: socket.socket) -> dict | None:
     buf = _recv_buffers.pop(conn, b'')
     try:
@@ -89,10 +92,12 @@ def _recv_expected_response(
         while True:
             remaining = deadline - time.time()
             if remaining <= 0:
+                debug_log.event("response_timeout", req_id=req_id, expected_status=expected_status)
                 return None
             conn.settimeout(remaining)
             resp = _recv_json(conn)
             if resp is None:
+                debug_log.event("response_missing", req_id=req_id, expected_status=expected_status)
                 return None
 
             status = resp.get("status")
@@ -101,6 +106,7 @@ def _recv_expected_response(
                 return resp
 
             _remember_pong(client, resp)
+            debug_log.event("response_unexpected", req_id=req_id, expected_status=expected_status, response=resp)
             print(f"[server] 다른 요청 응답 무시: {resp}")
     finally:
         conn.settimeout(None)
@@ -149,6 +155,15 @@ def _remove_client(client: dict):
     print(f"[server] 클라이언트 제거됨: {client['addr']}")
 
 
+def register_client(conn: socket.socket, addr: tuple, idx: int) -> dict:
+    client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "idx": idx, "available": 0, "potion_last_used": 0}
+    with _clients_lock:
+        _clients.append(client)
+    debug_log.event("client_registered", addr=addr, idx=idx)
+    return client
+
+
+@debug_log.trace
 def _handle_client(conn: socket.socket, addr: tuple):
     # 첫 메시지로 클라이언트가 보낸 idx 수신
     conn.settimeout(10)
@@ -164,9 +179,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
         conn.close()
         return
 
-    client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "idx": idx, "available": 0, "potion_last_used": 0}
-    with _clients_lock:
-        _clients.append(client)
+    client = register_client(conn, addr, idx)
 
     _send_json(conn, {"cmd": "reset_coord"})
     print(f"[server] 좌표 초기화 전송 → {addr}")
@@ -194,18 +207,19 @@ def _handle_client(conn: socket.socket, addr: tuple):
     finally:
         _remove_client(client)
 
-
 def _accept_loop(server_sock: socket.socket):
     while _server_running:
         try:
             conn, addr = server_sock.accept()
+            debug_log.event("client_accepted", addr=addr)
             t = threading.Thread(target=_handle_client, args=(conn, addr), daemon=True)
             t.start()
-        except OSError:
+        except OSError as exc:
+            debug_log.event("accept_loop_stopped", error=repr(exc))
             break
 
 
-# ── 픽업 명령 전송 ─────────────────────────────────────────────────────────────
+@debug_log.trace
 def _send_pickup(client: dict, nickname: str | None = None) -> bool:
     """특정 클라이언트에게 pickup 명령을 보내고 ack를 기다린다."""
     conn = client["conn"]
@@ -264,6 +278,7 @@ def _broadcast_move_coord(from_dir: str, to_dir: str):
     print(f"[server] 좌표 브로드캐스트: {from_dir} → {to_dir}  (dx={dx:+}, dy={dy:+})")
 
 
+
 # ── Exchange 루프 ──────────────────────────────────────────────────────────────
 def exchange_loop():
     global running, _client_coord_direction
@@ -279,7 +294,7 @@ def exchange_loop():
             _send_json(c["conn"], {"cmd": "reset_coord"})
     
 
-    WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = range(4)
+    WAIT_NICKNAME, READ_ADENA, MONITOR_BRIGHTNESS, PICKUP = "WAIT_NICKNAME", "READ_ADENA", "MONITOR_BRIGHTNESS", "PICKUP"
     stage = WAIT_NICKNAME
 
     greeted_nickname = None
@@ -287,11 +302,20 @@ def exchange_loop():
     prev_brightness = None
     brightness_changed = False
     _last_type_string_time = 0
-    _last_status_print_time = 0
+    _last_status_snapshot = None
     _last_potion_idx_time: dict = {}
     clients_snapshot = []
     _last_target_text = ''
     _last_target_first_seen = 0.0
+
+    def reset_exchange() -> None:
+        nonlocal stage, greeted_nickname, adena_before, prev_brightness, brightness_changed
+        stage = WAIT_NICKNAME
+        greeted_nickname = None
+        adena_before = None
+        prev_brightness = None
+        brightness_changed = False
+
     while running:
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
@@ -319,11 +343,12 @@ def exchange_loop():
                         macro.force_set_foreground_window(macro.lineage1_hwnd)
 
             total_count = sum(e["available"] for e in clients_snapshot)
-            if time.time() - _last_status_print_time >= 3:
+            status_snapshot = tuple((e.get("idx"), e.get("addr"), e.get("mp"), e.get("available")) for e in clients_snapshot)
+            if status_snapshot != _last_status_snapshot:
                 for e in clients_snapshot:
                     print(f"idx({e['idx']}): MP: {e['mp']}, 잔여: {e['available']}")
                 print(f"총 {total_count}")
-                _last_status_print_time = time.time()
+                _last_status_snapshot = status_snapshot
 
             if total_count < macro.direction_threshold:
                 if macro.current_direction != macro.low_count_direction:
@@ -407,11 +432,7 @@ def exchange_loop():
             if nickname in macro.blocked_list:
                 print(f"[server] blocked 닉네임 감지 ({nickname}) → 교환 거절")
                 macro.rejectExchange()
-                stage = WAIT_NICKNAME
-                greeted_nickname = None
-                adena_before = None
-                prev_brightness = None
-                brightness_changed = False
+                reset_exchange()
                 continue
 
             slot = macro.crop(img, 258, 677, 30, 30)
@@ -427,11 +448,7 @@ def exchange_loop():
         # ── Stage 4: 받은 아데나 계산 → 서버/클라이언트 픽업 분배 ──────────
         elif stage == PICKUP:
             if not brightness_changed:
-                stage = WAIT_NICKNAME
-                greeted_nickname = None
-                adena_before = None
-                prev_brightness = None
-                brightness_changed = False
+                reset_exchange()
                 continue
             adena_after = macro.readAdena()
             print(f"[server] 아데나 변화 감지: {adena_before} → {adena_after}")
@@ -504,15 +521,12 @@ def exchange_loop():
                 macro._DIRECTION_FUNCS[macro.high_count_direction]()
                 _broadcast_move_coord(from_dir, macro.high_count_direction)
 
-            stage = WAIT_NICKNAME
-            greeted_nickname = None
-            adena_before = None
-            prev_brightness = None
-            brightness_changed = False
+            reset_exchange()
 
 
 # ── 진입점 ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    debug_log.setup_process("server", host=HOST, port=PORT)
     macro.init_setting("server")
     _client_coord_direction = macro.current_direction
 

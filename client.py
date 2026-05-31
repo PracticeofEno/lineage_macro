@@ -14,6 +14,7 @@ import threading
 import sys
 from datetime import datetime, timezone, timedelta
 
+import debug_log
 import macro
 
 SERVER_HOST = '112.185.118.218'  # ← 서버 IP로 변경
@@ -28,8 +29,10 @@ CLIENT_IDX = int(sys.argv[1])
 running = False
 _conn_thread = None
 _recv_buffers: dict[socket.socket, bytes] = {}
+_last_ping_mp: int | None = None
 
 
+@debug_log.trace
 def _send_json(conn: socket.socket, obj: dict) -> bool:
     try:
         conn.sendall((json.dumps(obj) + '\n').encode())
@@ -38,6 +41,7 @@ def _send_json(conn: socket.socket, obj: dict) -> bool:
         return False
 
 
+@debug_log.trace
 def _recv_json(conn: socket.socket) -> dict | None:
     buf = _recv_buffers.pop(conn, b'')
     try:
@@ -54,13 +58,18 @@ def _recv_json(conn: socket.socket) -> dict | None:
         return None
 
 
+@debug_log.trace
 def _handle_command(msg: dict) -> dict | None:
+    global _last_ping_mp
+
     cmd = msg.get("cmd")
     req_id = msg.get("req_id")
 
     if cmd == "ping":
         mp = macro.readMp()
-        print(f"[client] ping 수신 → MP: {mp}")
+        if mp != _last_ping_mp:
+            print(f"[client] ping 수신 → MP: {mp}")
+            _last_ping_mp = mp
         return {"status": "pong", "mp": mp, "req_id": req_id}
 
     if cmd == "pickup":
@@ -130,6 +139,7 @@ def _connect_loop():
 
 
 if __name__ == "__main__":
+    debug_log.setup_process("client", server_host=SERVER_HOST, server_port=SERVER_PORT, client_idx=CLIENT_IDX)
     macro.init_setting("client")
 
     print("명령어: 1=연결 시작, 2=연결 중지, q=종료")

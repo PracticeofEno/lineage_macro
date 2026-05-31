@@ -44,8 +44,28 @@ def crop(image: Image.Image, x: int, y: int, width: int, height: int) -> Image.I
 
 
 def read_text(image: Image.Image, x: int, y: int, color: tuple) -> str:
-    result = []
     img_width = image.width
+
+    # 역방향으로 연속된 글자가 있으면 시작 위치를 앞으로 당긴다.
+    # 글자 폭은 10 또는 20px이므로, start_x-10 또는 start_x-20 위치에
+    # 동일 폭의 글자가 있으면 그쪽이 이전 글자의 시작점이다.
+    start_x = x
+    while True:
+        found = False
+        for prev_w in (10, 20):
+            test_x = start_x - prev_w
+            if test_x < 0:
+                continue
+            s = image_to_coord_string(crop(image, test_x, y, prev_w, 24), color)
+            if lookup(s) is not None:
+                start_x = test_x
+                found = True
+                break
+        if not found:
+            break
+
+    result = []
+    x = start_x
     while x < img_width:
         matched = None
         matched_width = None
@@ -69,6 +89,55 @@ def read_line(image: Image.Image, x: int, y: int, color: tuple) -> str:
     if not text:
         text = read_text(image, x + 10, y, color)
     return text
+
+
+def read_line_end(image: Image.Image, x: int, y: int, color: tuple) -> str:
+    """read_text와 동일하지만, 공백 1개(10px)를 건너뛴 뒤 글자가 있으면 공백 포함해 계속 읽는다."""
+    img_width = image.width
+
+    start_x = x
+    while True:
+        found = False
+        for prev_w in (10, 20):
+            test_x = start_x - prev_w
+            if test_x < 0:
+                continue
+            s = image_to_coord_string(crop(image, test_x, y, prev_w, 24), color)
+            if lookup(s) is not None:
+                start_x = test_x
+                found = True
+                break
+        if not found:
+            break
+
+    result = []
+    cur_x = start_x
+    while cur_x < img_width:
+        matched = None
+        matched_width = None
+        for w in (10, 20):
+            if cur_x + w > img_width:
+                continue
+            s = image_to_coord_string(crop(image, cur_x, y, w, 24), color)
+            if lookup(s) is not None:
+                matched = lookup(s)
+                matched_width = w
+                break
+        if matched is None:
+            if cur_x + 10 < img_width:
+                has_next = any(
+                    cur_x + 10 + w <= img_width
+                    and lookup(image_to_coord_string(crop(image, cur_x + 10, y, w, 24), color)) is not None
+                    for w in (10, 20)
+                )
+                if has_next:
+                    result.append(' ')
+                    cur_x += 10
+                    continue
+            break
+        result.append(matched)
+        cur_x += matched_width
+    return ''.join(result)
 
 
 def _read_exchange_nickname_img(screenshot: Image.Image, y: int = 292) -> str:

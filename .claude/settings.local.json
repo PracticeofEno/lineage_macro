@@ -16,7 +16,8 @@
       "Bash(powershell:*)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(pip install *)"
+      "Bash(pip install *)",
+      "Bash(python3 *)"
     ]
   }
 }

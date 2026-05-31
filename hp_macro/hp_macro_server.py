@@ -461,7 +461,7 @@ def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25, step_de
     for i in range(1, steps + 1):
         t = i / steps
         win32api.SetCursorPos((round(x1 + (x2 - x1) * t), round(y1 + (y2 - y1) * t)))
-        time.sleep(0.001)
+        time.sleep(0.01)
     macro.arduino_mouse_left_up()
     time.sleep(0.3)
 

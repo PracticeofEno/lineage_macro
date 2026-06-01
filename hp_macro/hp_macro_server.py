@@ -739,8 +739,9 @@ def run() -> None:
 
         if now - last_exp_gain_time >= MOVE_IF_NO_EXP_SECONDS:
             print(f"[hp_macro_server] {MOVE_IF_NO_EXP_SECONDS:.0f}초 EXP 변화 없음, 기준좌표로 이동")
-            _move_toward_base()
-            last_exp_gain_time = time.time()
+            for _ in range(5):
+                _move_toward_base()
+                last_exp_gain_time = time.time()
 
         # ── 몬스터 사냥 상태머신 ───────────────────────────────────
         if hunt_state == 'idle':

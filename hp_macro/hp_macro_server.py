@@ -727,21 +727,21 @@ def run() -> None:
                 continue
 
         # ── 30초 EXP 무변화 → 기준좌표 이동 ──────────────────────────
-        if now - last_global_exp_poll >= MONSTER_POLL_INTERVAL:
-            last_global_exp_poll = now
-            g_exp = macro.readExp()
-            if last_global_exp is None:
-                last_global_exp    = g_exp
-                last_exp_gain_time = now
-            elif g_exp != last_global_exp:
-                last_global_exp    = g_exp
-                last_exp_gain_time = now
+        # if now - last_global_exp_poll >= MONSTER_POLL_INTERVAL:
+        #     last_global_exp_poll = now
+        #     g_exp = macro.readExp()
+        #     if last_global_exp is None:
+        #         last_global_exp    = g_exp
+        #         last_exp_gain_time = now
+        #     elif g_exp != last_global_exp:
+        #         last_global_exp    = g_exp
+        #         last_exp_gain_time = now
 
-        if now - last_exp_gain_time >= MOVE_IF_NO_EXP_SECONDS:
-            print(f"[hp_macro_server] {MOVE_IF_NO_EXP_SECONDS:.0f}초 EXP 변화 없음, 기준좌표로 이동")
-            for _ in range(5):
-                _move_toward_base()
-                last_exp_gain_time = time.time()
+        # if now - last_exp_gain_time >= MOVE_IF_NO_EXP_SECONDS:
+        #     print(f"[hp_macro_server] {MOVE_IF_NO_EXP_SECONDS:.0f}초 EXP 변화 없음, 기준좌표로 이동")
+        #     for _ in range(5):
+        #         _move_toward_base()
+        #         last_exp_gain_time = time.time()
 
         # ── 몬스터 사냥 상태머신 ───────────────────────────────────
         if hunt_state == 'idle':

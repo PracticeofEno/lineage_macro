@@ -50,8 +50,8 @@ MONSTER_EXP_TIMEOUT   = 15.0   # EXP 변화 없으면 다음 몬스터 탐색까
 MONSTER_POLL_INTERVAL = 1.0    # EXP 폴링 간격(초)
 EXP_CHANGE_DELAY      = 2.0    # EXP 변화 후 idle 전환까지 대기 시간(초)
 
-BASE_GAME_X     = 32806   # 귀환 기준 게임 좌표 X
-BASE_GAME_Y     = 32976   # 귀환 기준 게임 좌표 Y
+BASE_GAME_X     = 32765   # 귀환 기준 게임 좌표 X
+BASE_GAME_Y     = 32984   # 귀환 기준 게임 좌표 Y
 SCREEN_CENTER_X = 645     # 플레이어 화면 중심 X (절대좌표)
 SCREEN_CENTER_Y = 380     # 플레이어 화면 중심 Y (절대좌표, 십자선 기준)
 TILE_PX_X       = 40      # 1타일 이동 시 화면 X 변화량

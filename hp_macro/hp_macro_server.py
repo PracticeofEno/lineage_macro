@@ -591,15 +591,22 @@ def click_drag_monster(cx: int, cy: int) -> None:
 
 
 def _detect_monster() -> tuple[int, int] | None:
-    """스크린샷에서 가장 큰 몬스터를 탐지하고 중심 좌표를 반환한다. 없으면 None."""
+    """스크린샷에서 화면 중심(SCREEN_CENTER_X/Y, 절대좌표)에 가장 가까운 몬스터를
+    탐지하고 중심 좌표(클라이언트 상대)를 반환한다. 없으면 None."""
     try:
         img_bgr = _bgr_screenshot()
         monsters = _detect_pink_monsters_for_overlay(img_bgr)
         _ov_update(monsters=monsters)
         if not monsters:
             return None
-        biggest = max(monsters, key=lambda m: m['area'])
-        return biggest['center']
+
+        def _dist2_to_center(m: dict) -> int:
+            cx, cy = m['center']
+            sx, sy = _client_to_screen_xy(cx, cy)  # 클라이언트 상대 → 절대좌표
+            return (sx - SCREEN_CENTER_X) ** 2 + (sy - SCREEN_CENTER_Y) ** 2
+
+        nearest = min(monsters, key=_dist2_to_center)
+        return nearest['center']
     except Exception as e:
         print(f"[hp_macro_server] 몬스터 탐지 오류: {e}")
         _ov_update(monsters=[])

@@ -468,7 +468,7 @@ def _hold_f5(seconds: float) -> None:
 def _press_f8_local() -> None:
     macro.force_set_foreground_window(macro.lineage1_hwnd)
     macro.arduino_key_press(win32con.VK_F8)
-    win32api.SetCursorPos(168, 175)
+    win32api.SetCursorPos((168, 175))
     time.sleep(1)
     macro.arduino_mouse_click_left()
     time.sleep(1)

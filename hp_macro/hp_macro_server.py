@@ -498,9 +498,9 @@ def _detect_pink_monsters_for_overlay(img_bgr: np.ndarray) -> list[dict[str, Any
     return monsters
 
 
-def _setcursor_drag(x1: int, y1: int, steps: int = 25, step_delay: float = 0.01) -> None:
-    """SetCursorPos로 이동, Arduino LP/DR로 좌버튼 누름/뗌."""
-    _ov_update(drag_start=(x1, y1), drag_end=(x1,y1 + 200))
+def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25) -> None:
+    """SetCursorPos로 (x1,y1)→(x2,y2) 이동, Arduino LP/DR로 좌버튼 누름/뗌."""
+    _ov_update(drag_start=(x1, y1), drag_end=(x2, y2))
     # macro.force_set_foreground_window(macro.lineage1_hwnd)
     # time.sleep(0.3)
     win32api.SetCursorPos((x1, y1))
@@ -509,7 +509,7 @@ def _setcursor_drag(x1: int, y1: int, steps: int = 25, step_delay: float = 0.01)
     time.sleep(0.1)
     for i in range(1, steps + 1):
         t = i / steps
-        win32api.SetCursorPos(x1, round(y1 + (200 * t)))
+        win32api.SetCursorPos((round(x1 + (x2 - x1) * t), round(y1 + (y2 - y1) * t)))
         time.sleep(0.001)
     macro.arduino_mouse_left_up()
     time.sleep(0.1)
@@ -587,7 +587,7 @@ def click_drag_monster(cx: int, cy: int) -> None:
             f" → safe=({safe_x},{safe_y})"
         )
     print(f"[hp_macro_server] 드래그: ({safe_x},{safe_y}) → ({DRAG_TARGET_X},{DRAG_TARGET_Y})")
-    _setcursor_drag(safe_x, safe_y, DRAG_TARGET_X, DRAG_TARGET_Y)
+    _setcursor_drag(safe_x, safe_y, safe_x, safe_y + 200)
 
 
 def _detect_monster() -> tuple[int, int] | None:

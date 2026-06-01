@@ -73,6 +73,24 @@ V_MIN = 90      # 반투명이라도 눈 위라 밝다. 너무 어두운 그림�
 V_MAX = 255
 S_MIN = 12      # 완전 무채색(눈) 배제. 단, 반투명이라 매우 낮게 둠
 
+# ── 어두운 배경용 보라색 몬스터 보조 검출 ─────────────────────────────
+#   어두운 지형에서는 몬스터가 BGR≈(50~70, 40~60, 40~65) 정도의
+#   저명도 보라색 실루엣으로 보이며, 기존 V_MIN/G_GAP_MIN 조건에서 탈락한다.
+#   나무/그림자 오탐을 줄이기 위해 dark blob 안에 고채도 보라 픽셀이
+#   일정량 이상 포함된 경우만 최종 통과시킨다.
+DARK_V_MIN = 35
+DARK_V_MAX = 120
+DARK_S_MIN = 18
+DARK_H_MIN = 105
+DARK_H_MAX = 160
+DARK_R_G_GAP_MIN = 1
+DARK_B_G_GAP_MIN = 5
+DARK_RB_BALANCE = 35
+DARK_CORE_S_MIN = 90
+DARK_CORE_RATIO_MIN = 0.02
+DARK_CORE_PIXEL_MIN = 20
+DARK_MAX_AREA = 12000
+
 # ── 형태소 연산 : 흩어진 픽셀 정리 후 한 덩어리로 병합 ─────────────────
 OPEN_KSIZE  = 2     # 점 노이즈 제거 (작게)
 CLOSE_KSIZE = 3     # 한 몬스터의 끊긴 부위만 살짝 병합(크게 잡으면 인접
@@ -111,12 +129,8 @@ def _roi_mask(shape) -> np.ndarray:
     return m
 
 
-def pink_mask(img_bgr: np.ndarray) -> np.ndarray:
-    """
-    반투명 연분홍 픽셀 마스크를 만든다 (형태소 연산 전, 순수 색 신호).
-
-    반환: uint8 마스크 (0 또는 255)
-    """
+def _color_masks(img_bgr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """밝은 분홍 마스크와 어두운 보라 마스크를 각각 만든다."""
     b, g, r = cv2.split(img_bgr.astype(np.int16))
 
     # ★ 핵심 신호: G 가 R, B 보다 충분히 낮고(분홍 틴트), R·B 는 균형.
@@ -128,14 +142,37 @@ def pink_mask(img_bgr: np.ndarray) -> np.ndarray:
 
     # 보조: 밝기/채도
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-    s, v = hsv[:, :, 1], hsv[:, :, 2]
+    h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
     bright = (v >= V_MIN) & (v <= V_MAX) & (s >= S_MIN)
+    bright_mask = (tint & bright).astype(np.uint8) * 255
 
-    mask = (tint & bright).astype(np.uint8) * 255
+    dark_purple = (
+        (v >= DARK_V_MIN) &
+        (v <= DARK_V_MAX) &
+        (s >= DARK_S_MIN) &
+        (h >= DARK_H_MIN) &
+        (h <= DARK_H_MAX) &
+        ((r - g) >= DARK_R_G_GAP_MIN) &
+        ((b - g) >= DARK_B_G_GAP_MIN) &
+        (np.abs(r - b) <= DARK_RB_BALANCE)
+    )
+    dark_mask = dark_purple.astype(np.uint8) * 255
 
     # UI 영역 제거
-    mask = cv2.bitwise_and(mask, _roi_mask(img_bgr.shape))
-    return mask
+    roi = _roi_mask(img_bgr.shape)
+    bright_mask = cv2.bitwise_and(bright_mask, roi)
+    dark_mask = cv2.bitwise_and(dark_mask, roi)
+    return bright_mask, dark_mask
+
+
+def pink_mask(img_bgr: np.ndarray) -> np.ndarray:
+    """
+    반투명 연분홍/어두운 보라 픽셀 마스크를 만든다.
+
+    반환: uint8 마스크 (0 또는 255)
+    """
+    bright_mask, dark_mask = _color_masks(img_bgr)
+    return cv2.bitwise_or(bright_mask, dark_mask)
 
 
 def _morph(mask: np.ndarray) -> np.ndarray:
@@ -149,6 +186,18 @@ def _morph(mask: np.ndarray) -> np.ndarray:
     return mask
 
 
+def _has_dark_purple_core(h_vals: np.ndarray, s_vals: np.ndarray) -> bool:
+    core = (
+        (s_vals >= DARK_CORE_S_MIN) &
+        (h_vals >= DARK_H_MIN) &
+        (h_vals <= DARK_H_MAX)
+    )
+    core_pixels = int(core.sum())
+    if core_pixels < DARK_CORE_PIXEL_MIN:
+        return False
+    return core_pixels / float(s_vals.size) >= DARK_CORE_RATIO_MIN
+
+
 def detect(img_bgr: np.ndarray):
     """
     연분홍 몬스터 탐지.
@@ -156,8 +205,11 @@ def detect(img_bgr: np.ndarray):
     반환: list of dict
         {"cx","cy": 중심좌표, "x","y","w","h": 바운딩박스, "area": 면적}
     """
-    mask = _morph(pink_mask(img_bgr))
-    sat = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)[:, :, 1]   # 채도 채널
+    bright_mask, dark_mask = _color_masks(img_bgr)
+    mask = _morph(cv2.bitwise_or(bright_mask, dark_mask))
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    hue = hsv[:, :, 0]
+    sat = hsv[:, :, 1]
 
     n, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
 
@@ -169,8 +221,18 @@ def detect(img_bgr: np.ndarray):
         w = int(stats[i, cv2.CC_STAT_WIDTH])
         h = int(stats[i, cv2.CC_STAT_HEIGHT])
 
+        blob = labels[y:y+h, x:x+w] == i
+        s_vals = sat[y:y+h, x:x+w][blob]
+        h_vals = hue[y:y+h, x:x+w][blob]
+        if s_vals.size == 0:
+            continue
+        bright_pixels = int((bright_mask[y:y+h, x:x+w][blob] > 0).sum())
+        dark_pixels = int((dark_mask[y:y+h, x:x+w][blob] > 0).sum())
+
         # 1) 크기 필터
-        if not (MIN_AREA <= area <= MAX_AREA):
+        dark_dominant = dark_pixels > bright_pixels
+        max_area = DARK_MAX_AREA if dark_dominant else MAX_AREA
+        if not (MIN_AREA <= area <= max_area):
             continue
         if w < MIN_WIDTH or h < MIN_HEIGHT:
             continue
@@ -180,12 +242,11 @@ def detect(img_bgr: np.ndarray):
         if fill < MIN_FILL:
             continue
 
-        # 3) ★ 캐릭터 배제 : blob 내 최대 채도가 높으면 선명한 분홍 캐릭터
-        blob = labels[y:y+h, x:x+w] == i
-        s_vals = sat[y:y+h, x:x+w][blob]
-        if s_vals.size == 0:
-            continue
-        if int(s_vals.max()) >= CHAR_SMAX:
+        # 3) ★ 캐릭터/오탐 배제
+        if dark_dominant:
+            if not _has_dark_purple_core(h_vals, s_vals):
+                continue
+        elif int(s_vals.max()) >= CHAR_SMAX:
             continue   # 선명한 분홍 갑옷 캐릭터로 판단 → 제외
 
         cx, cy = centroids[i]

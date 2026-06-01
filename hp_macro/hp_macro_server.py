@@ -41,7 +41,7 @@ MP_PERCENT_THRESHOLD     = 10.0
 POLL_INTERVAL_SECONDS    = 0.2
 F5_HOLD_SECONDS          = 1.0
 F8_COOLDOWN_SECONDS      = 1800.0
-F8_INTERVAL_SECONDS      = 1800.0
+F8_INTERVAL_SECONDS      = 1800000.0
 TRIGGER_COOLDOWN_SECONDS = 2.5
 STATUS_INTERVAL_SECONDS  = 1.0
 PING_INTERVAL_SECONDS    = 5.0
@@ -50,14 +50,14 @@ MONSTER_EXP_TIMEOUT   = 15.0   # EXP 변화 없으면 다음 몬스터 탐색까
 MONSTER_POLL_INTERVAL = 1.0    # EXP 폴링 간격(초)
 EXP_CHANGE_DELAY      = 3.0    # EXP 변화 후 idle 전환까지 대기 시간(초)
 
-BASE_GAME_X     = 32779   # 귀환 기준 게임 좌표 X
-BASE_GAME_Y     = 33205   # 귀환 기준 게임 좌표 Y
+BASE_GAME_X     = 32749   # 귀환 기준 게임 좌표 X
+BASE_GAME_Y     = 33023   # 귀환 기준 게임 좌표 Y
 SCREEN_CENTER_X = 645     # 플레이어 화면 중심 X (절대좌표)
 SCREEN_CENTER_Y = 380     # 플레이어 화면 중심 Y (절대좌표, 십자선 기준)
 TILE_PX_X       = 40      # 1타일 이동 시 화면 X 변화량
 TILE_PX_Y       = 20      # 1타일 이동 시 화면 Y 변화량
-WALK_TILES      = 2       # EXP 변화 없을 때 한 번에 이동할 타일 수
-MOVE_IF_NO_EXP_SECONDS = 30.0  # 이 시간 동안 EXP 변화 없으면 기준좌표로 이동
+WALK_TILES      = 3       # EXP 변화 없을 때 한 번에 이동할 타일 수
+MOVE_IF_NO_EXP_SECONDS = 50.0  # 이 시간 동안 EXP 변화 없으면 기준좌표로 이동
 
 HP_READ: dict[str, Any] = {
     "x": 976, "y": 71, "width": 80, "height": 21,
@@ -498,9 +498,9 @@ def _detect_pink_monsters_for_overlay(img_bgr: np.ndarray) -> list[dict[str, Any
     return monsters
 
 
-def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25, step_delay: float = 0.01) -> None:
+def _setcursor_drag(x1: int, y1: int, steps: int = 25, step_delay: float = 0.01) -> None:
     """SetCursorPos로 이동, Arduino LP/DR로 좌버튼 누름/뗌."""
-    _ov_update(drag_start=(x1, y1), drag_end=(x2, y2))
+    _ov_update(drag_start=(x1, y1), drag_end=(x1,y1 + 200))
     # macro.force_set_foreground_window(macro.lineage1_hwnd)
     # time.sleep(0.3)
     win32api.SetCursorPos((x1, y1))
@@ -509,7 +509,7 @@ def _setcursor_drag(x1: int, y1: int, x2: int, y2: int, steps: int = 25, step_de
     time.sleep(0.1)
     for i in range(1, steps + 1):
         t = i / steps
-        win32api.SetCursorPos((round(x1 + (x2 - x1) * t), round(y1 + (y2 - y1) * t)))
+        win32api.SetCursorPos(x1, round(y1 + (200 * t)))
         time.sleep(0.001)
     macro.arduino_mouse_left_up()
     time.sleep(0.1)
@@ -715,8 +715,9 @@ def run() -> None:
                 _hold_f5(F5_HOLD_SECONDS)
                 if client_trigger:
                     t.join()
-                # HP 회복 직후 몬스터 재탐지
-                hunt_state = 'idle'
+                _ov_update(hp_state=hp_state, mp_state=mp_state, hunt_state=hunt_state)
+                time.sleep(POLL_INTERVAL_SECONDS)
+                continue
 
         # ── 30초 EXP 무변화 → 기준좌표 이동 ──────────────────────────
         if now - last_global_exp_poll >= MONSTER_POLL_INTERVAL:
@@ -745,6 +746,7 @@ def run() -> None:
                 hunt_start     = time.time()
                 last_exp_check = time.time()
                 hunt_state     = 'hunting'
+                _ov_update(hunt_state=hunt_state)
 
         elif hunt_state == 'hunting':
             if now - last_exp_check >= MONSTER_POLL_INTERVAL:
@@ -755,14 +757,17 @@ def run() -> None:
                     print(f"[hp_macro_server] EXP 변화: {hunt_prev_exp} → {curr_exp}, {EXP_CHANGE_DELAY:.0f}초 후 다음 몬스터 탐색")
                     hunt_exp_changed_at = time.time()
                     hunt_state = 'exp_changed'
+                    _ov_update(hunt_state=hunt_state)
                 elif elapsed >= MONSTER_EXP_TIMEOUT:
                     print(f"[hp_macro_server] {MONSTER_EXP_TIMEOUT:.0f}초 EXP 변화 없음, {EXP_CHANGE_DELAY:.0f}초 후 다음 몬스터 탐색")
                     hunt_exp_changed_at = time.time()
                     hunt_state = 'exp_changed'
+                    _ov_update(hunt_state=hunt_state)
 
         elif hunt_state == 'exp_changed':
             if now - hunt_exp_changed_at >= EXP_CHANGE_DELAY:
                 hunt_state = 'idle'
+                _ov_update(hunt_state=hunt_state)
 
         time.sleep(POLL_INTERVAL_SECONDS)
 

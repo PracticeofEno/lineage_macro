@@ -41,7 +41,7 @@ MP_PERCENT_THRESHOLD     = 10.0
 POLL_INTERVAL_SECONDS    = 0.2
 F5_HOLD_SECONDS          = 1.0
 F8_COOLDOWN_SECONDS      = 1800.0
-F8_INTERVAL_SECONDS      = 1800000.0
+F8_INTERVAL_SECONDS      = 1800.0
 TRIGGER_COOLDOWN_SECONDS = 2.5
 STATUS_INTERVAL_SECONDS  = 1.0
 PING_INTERVAL_SECONDS    = 5.0
@@ -468,6 +468,10 @@ def _hold_f5(seconds: float) -> None:
 def _press_f8_local() -> None:
     macro.force_set_foreground_window(macro.lineage1_hwnd)
     macro.arduino_key_press(win32con.VK_F8)
+    win32api.SetCursorPos(168, 175)
+    time.sleep(1)
+    macro.arduino_mouse_click_left()
+    time.sleep(1)
 
 
 # ═══════════════════════════════════════════════════════════════════

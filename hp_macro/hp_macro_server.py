@@ -704,7 +704,7 @@ def run() -> None:
 
         # ── HP 체크 (몬스터 사냥보다 우선) ────────────────────────
         if hp_state is not None:
-            hp_low        = hp_state["maximum"] - hp_state["current"] > 30
+            hp_low        = hp_state["maximum"] - hp_state["current"] > 20
             client_trigger = hp_state["maximum"] != hp_state["current"]
             trigger_ready = now - last_trigger_time >= TRIGGER_COOLDOWN_SECONDS
 

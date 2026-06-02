@@ -153,6 +153,35 @@ def arduino_key_press(vk: int, duration: float = 0.05):
     if duration > 0.05:
         time.sleep(duration - 0.05)
 
+# ── 우상단 상태창 OCR ─────────────────────────────────────────────────────────
+# 상태창은 가방 등에 가려지지 않는 한 항상 정확하다(배경이 일정). 이 값을 정답으로
+# 삼아 하단 바 OCR(read_hp/read_mp)을 보정/검증한다.
+#   HP: y=71, 글자색 (247,201,227) 흰빛 분홍
+#   MP: y=96, 글자색 (204,227,255) 흰빛 하늘
+def _read_status_value(img, y: int, color: tuple) -> int:
+    for dx in (0, 5, 10):
+        cropped = crop(img, 976 + dx, y, 120, 21)
+        text = read_text(cropped, 0, 0, color)
+        parts = text.split('/')
+        digits = ''.join(c for c in parts[0] if c.isdigit())
+        if digits:
+            return int(digits)
+    return 0
+
+
+def read_mp_with_status(img=None) -> int:
+    """우상단 상태창에서 현재 MP를 읽는다(정확값). 실패 시 0."""
+    if img is None:
+        img = screenshot()
+    return _read_status_value(img, 96, (0xCC, 0xE3, 0xFF))
+
+
+def read_hp_with_status(img=None) -> int:
+    """우상단 상태창에서 현재 HP를 읽는다(정확값). 실패 시 0.
+    read_mp_with_status와 동일한 로직, 위치(y=71)와 글자색만 다르다."""
+    if img is None:
+        img = screenshot()
+    return _read_status_value(img, 71, (247, 201, 227))
 
 def arduino_mouse_move(x: int, y: int):
     _arduino_send(f'MM,{x},{y}')
@@ -711,77 +740,66 @@ def get_brightness(image: Image.Image) -> float:
 
 # ── 하단 피통바 OCR (HP=빨간 바, MP=파란 바) ──────────────────────────────────
 # 상태창(우상단)이 가방 등으로 가려져도 항상 보이는 하단 바에서 HP/MP를 읽는다.
-# 각 숫자는 폭 10px 고정 셀에 그려진다. 셀 내부의 글자색 픽셀 좌표문자열을 만들어
-# 숫자 템플릿과 매칭한다 — 상태창 OCR과 같은 원리이지만 글꼴/색이 달라 바 전용
-# 템플릿을 쓴다. 정렬 때문에 한쪽 끝 좌표가 자릿수와 무관하게 고정이다:
-#   HP=우측정렬 → 최대값 끝자리 셀이 항상 x=527 (오른쪽에서 왼쪽으로 읽음)
-#   MP=좌측정렬 → 현재값 첫자리 셀이 항상 x=717 (왼쪽에서 오른쪽으로 읽음)
+# 각 숫자는 폭 10px 고정 셀에 그려진다. 정렬 때문에 한쪽 끝 셀이 자릿수와 무관하게
+# 고정이다:  HP=우측정렬(최대값 끝자리 셀 x=527, 오른쪽→왼쪽),
+#            MP=좌측정렬(현재값 첫자리 셀 x=717, 왼쪽→오른쪽).
+#
+# [코어색 박스로 글자 분리]  바 게이지가 줄면 글자 뒤 배경이 빨강(가득)→어두움(빈칸)
+# 으로 바뀐다. 하지만 글자의 불투명 코어색은 배경·잔량과 무관하게 일정하다
+# (HP=흰빛분홍 (255,213,213), MP=흰빛하늘 (200,206,255)). 그 코어색 ±tol 박스만 잡으면
+# 가장자리 변동이 빠져 숫자 하나가 (거의) 좌표문자열 1개로 모인다. 셀의 좌표문자열을
+# {좌표문자열: 숫자} 사전에서 dict.get() 한 번에 조회한다.
+# 사전은 build_bar_templates.py 가 라벨된 스크린샷들로 생성한 bar_templates.json.
+# (초록=중독 프레임은 학습에서 제외했다.)
 
-_BAR_HP_DIGITS: dict[str, str] = {
-    "44412413535455565758595105115125136263646566676869610611612613727374757677787971071171271383848586878889810811812813912913": "1",
-    "2421142434748412413525357585125136263676861261372737475767778797107117127138384858687888981081181294959699910911": "3",
-    "262728292102113536373839310311444546474849410411412413575851251362636768612613727374757677787971071183848586878889810949596979899": "0",
-    "2621121221335363113123134445464748412413575851251362636768612613727374757677787971071183848586878889810949596979899": "9",
-    "242526272829210211343536373839310424344454647484124135253575851251362636768612613727374777879710711712713838488898108118129499910911": "6",
-    "24211212213310311312313424349410411412413525351251362636768612613727374757677787127138384858687812813949596911912913": "2",
-    "22232425262113233343536424344454649412413525355565125136263666126137273767778797107117127138283868788898108118129293979899910911": "5",
-    "242526292102113435363931042434445464748494124135253575851251362636768612613727376777879710711712713858687888981081181294959699910911": "8",
-    "27282937383946474849596469727374757677787971071171271383848586878889810811812949596979899910911": "4",
-    "244243525358595105115126263676869610611612613727376777879710711828386878889810929394": "7",
-}
-
-_BAR_MP_DIGITS: dict[str, str] = {
-    "4344454647484941041141253545556575859510511512": "1",
-    "04050901014152324252627285657585951051151269610747579710": "8",
-    "0304051314152324255657585951051151268696107879710": "5",
-    "01101211111229210211212535455565764657475711712": "2",
-    "48494104114125657585951073": "7",
-    "011012242526275354555657585951064656667687475767778": "9",
-    "081826272853545556575859510511512646566676869610747576777879710": "4",
-    "53545556575859510511512646569610747579710": "3",
-    "0405060708090101415161723242526275358595105115126961079710": "6",
-    "06070809010161718191102425262728292102112125354555657585951064656667687475767778": "0",
-}
-
-# 스탯별 바 설정.
-#   rgb_min : 글자색 분리용 하한 (배경과 구분)
-#   y0, h, cell_w : 셀 영역의 세로 위치/높이, 셀 폭(=글꼴 피치 10px)
-#   anchor  : 고정된 끝의 셀 시작 x. step : 읽기 방향(+10 오른쪽 / -10 왼쪽).
-#   bound   : 읽기를 멈출 x 한계. digits : 셀 좌표문자열 -> 숫자 템플릿.
 _BAR_CONFIGS: dict[str, dict] = {
-    "HP": {  # 빨간 바, 흰빛 핑크 글자 — 우측정렬, 오른쪽(527) 고정
-        "rgb_min": (180, 140, 140),
-        "y0": 667, "h": 15, "cell_w": 10,
-        "anchor": 527, "step": -10, "bound": 430,
-        "digits": _BAR_HP_DIGITS,
-    },
-    "MP": {  # 파란 바, 청백색 글자 — 좌측정렬, 왼쪽(717) 고정
-        "rgb_min": (200, 200, 220),
-        "y0": 667, "h": 14, "cell_w": 10,
-        "anchor": 717, "step": 10, "bound": 840,
-        "digits": _BAR_MP_DIGITS,
-    },
+    "HP": {"y0": 667, "h": 15, "center": (255, 213, 213), "tol": 5, "anchor": 527, "step": -10, "bound": 430},
+    "MP": {"y0": 667, "h": 14, "center": (200, 206, 255), "tol": 5, "anchor": 717, "step": 10, "bound": 840},
 }
+
+# stat -> {좌표문자열: 숫자}
+_BAR_TEMPLATES: dict[str, dict[str, str]] = {}
+
+
+def _load_bar_templates() -> None:
+    path = os.path.join(_BASE, "bar_templates.json")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    for stat, cfg in data.items():
+        if stat not in _BAR_CONFIGS:
+            continue
+        if "center" in cfg:
+            _BAR_CONFIGS[stat]["center"] = tuple(cfg["center"])
+        if "tol" in cfg:
+            _BAR_CONFIGS[stat]["tol"] = cfg["tol"]
+        if "y0" in cfg:
+            _BAR_CONFIGS[stat]["y0"] = cfg["y0"]
+        if "h" in cfg:
+            _BAR_CONFIGS[stat]["h"] = cfg["h"]
+        _BAR_TEMPLATES[stat] = dict(cfg.get("digits", {}))
+
+
+_load_bar_templates()
 
 
 def _bar_cell_coordstr(arr: np.ndarray, cx: int, cfg: dict) -> str:
-    """고정 셀(cx, cfg["y0"]) 내부의 글자색 픽셀 좌표문자열을 만든다."""
-    y0, h, w = cfg["y0"], cfg["h"], cfg["cell_w"]
-    rmin, gmin, bmin = cfg["rgb_min"]
-    sub = arr[y0:y0 + h, cx:cx + w]
-    r = sub[:, :, 0].astype(int)
-    g = sub[:, :, 1].astype(int)
-    b = sub[:, :, 2].astype(int)
-    mask = (r >= rmin) & (g >= gmin) & (b >= bmin)
+    """고정 셀(cx, cfg["y0"]) 내부에서 글자 코어색(center ±tol 박스) 픽셀 좌표 문자열."""
+    sub = arr[cfg["y0"]:cfg["y0"] + cfg["h"], cx:cx + 10].astype(int)
+    cr, cg, cb = cfg["center"]
+    tol = cfg["tol"]
+    mask = ((np.abs(sub[:, :, 0] - cr) <= tol)
+            & (np.abs(sub[:, :, 1] - cg) <= tol)
+            & (np.abs(sub[:, :, 2] - cb) <= tol))
     ys, xs = np.where(mask)
     return "".join(f"{x}{y}" for x, y in sorted(zip(xs.tolist(), ys.tolist())))
 
 
-def _bar_digit_groups(arr: np.ndarray, cfg: dict) -> list[str]:
-    """고정 앵커(cfg["anchor"])에서 step 방향으로 셀을 훑으며 숫자를 인식하고,
-    연속된 숫자 셀끼리 묶어 그룹 리스트로 돌려준다. 숫자가 아닌 셀(접두사/":"/"/")은
-    템플릿에 없어 그룹 경계가 된다. 왼쪽으로 읽었으면(step<0) 자릿수를 뒤집는다."""
-    digits = cfg["digits"]
+def _bar_digit_groups(arr: np.ndarray, stat: str) -> list[str]:
+    """고정 앵커에서 step 방향으로 셀을 훑으며 숫자를 인식하고, 연속된 숫자 셀끼리
+    묶어 그룹 리스트로 돌려준다. 숫자가 아닌 셀(접두사/":"/"/")은 사전에 없어
+    그룹 경계가 된다. 왼쪽으로 읽었으면(step<0) 각 그룹 자릿수를 정방향으로 뒤집는다."""
+    cfg = _BAR_CONFIGS[stat]
+    digits = _BAR_TEMPLATES[stat]
     anchor, step, bound = cfg["anchor"], cfg["step"], cfg["bound"]
 
     groups: list[list[str]] = []
@@ -800,7 +818,7 @@ def _bar_digit_groups(arr: np.ndarray, cfg: dict) -> list[str]:
     if current and len(groups) < 2:
         groups.append(current)
 
-    if step < 0:  # 왼쪽으로 읽었으면 각 그룹 자릿수를 정방향으로 뒤집는다
+    if step < 0:
         groups = [g[::-1] for g in groups]
     return ["".join(g) for g in groups]
 
@@ -808,13 +826,12 @@ def _bar_digit_groups(arr: np.ndarray, cfg: dict) -> list[str]:
 def read_bar_stat(image: Image.Image, stat: str) -> tuple[int | None, int | None]:
     """하단 피통바에서 (현재값, 최대값)을 읽는다. stat = "HP" 또는 "MP".
     인식 실패 시 해당 값은 None."""
-    cfg = _BAR_CONFIGS[stat]
     arr = np.array(image.convert("RGB"))
-    groups = _bar_digit_groups(arr, cfg)
+    groups = _bar_digit_groups(arr, stat)
     if len(groups) < 2:
         return None, None
     # MP(왼쪽->오른쪽): [현재, 최대].  HP(오른쪽->왼쪽): [최대, 현재].
-    if cfg["step"] > 0:
+    if _BAR_CONFIGS[stat]["step"] > 0:
         current, maximum = int(groups[0]), int(groups[1])
     else:
         maximum, current = int(groups[0]), int(groups[1])

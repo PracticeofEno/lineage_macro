@@ -72,10 +72,10 @@ def _handle_command(msg: dict) -> dict | None:
 
     if cmd == "ping":
         img = macro.screenshot()
-        hp = macro.read_hp(img)
+        current_hp, max_hp = macro.read_hp(img)
         mp = macro.read_mp(img)
-        print(f"[client] ping 수신 → HP: {hp}, MP: {mp}")
-        return {"status": "pong", "mp": mp, "req_id": req_id}
+        print(f"[client] ping 수신 → HP: {current_hp}/{max_hp}, MP: {mp}")
+        return {"status": "pong", "mp": mp, "hp": current_hp, "max_hp": max_hp, "req_id": req_id}
 
     if cmd == "click":
         x, y = msg.get("x", 1080), msg.get("y", 174)

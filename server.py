@@ -76,6 +76,8 @@ def _remember_pong(client: dict | None, resp: dict):
     if client is None or resp.get("status") != "pong":
         return
     client["mp"] = resp.get("mp", 0)
+    client["hp"] = resp.get("hp", 0)
+    client["max_hp"] = resp.get("max_hp", 0)
     client["available"] = int(client["mp"] // 20)
 
 
@@ -167,14 +169,14 @@ def _handle_client(conn: socket.socket, addr: tuple):
         conn.close()
         return
 
-    client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "idx": idx, "available": 0, "potion_last_used": 0}
+    client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "hp": 0, "max_hp": 0, "idx": idx, "available": 0, "potion_last_used": 0}
     with _clients_lock:
         _clients.append(client)
 
     _send_json(conn, {"cmd": "reset_coord"})
     print(f"[server] 좌표 초기화 전송 → {addr}")
 
-    mp_zero_since: float | None = None
+    hp_zero_since: float | None = None
 
     try:
         while True:
@@ -193,13 +195,15 @@ def _handle_client(conn: socket.socket, addr: tuple):
                     break
                 if resp.get("status") == "pong":
                     client["mp"] = resp.get("mp", 0)
+                    client["hp"] = resp.get("hp", 0)
+                    client["max_hp"] = resp.get("max_hp", 0)
                     client["available"] = int(client["mp"] // 20)
-                    # print(f"[server] client {addr} MP: {client['mp']}  available: {client['available']}")
+                    # print(f"[server] client {addr} HP: {client['hp']}  MP: {client['mp']}  available: {client['available']}")
 
-                    if client["mp"] == 0:
-                        if mp_zero_since is None:
-                            mp_zero_since = time.time()
-                        elif time.time() - mp_zero_since >= 60:
+                    if client["hp"] == 0:
+                        if hp_zero_since is None:
+                            hp_zero_since = time.time()
+                        elif time.time() - hp_zero_since >= 60:
                             do_click = False
                             with _last_click_idx_lock:
                                 if time.time() - _last_click_idx_time.get(idx, 0) >= 2:
@@ -207,7 +211,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
                                     do_click = True
                             if do_click:
                                 click_req_id = _next_request_id()
-                                print(f"[server] MP 0 5분 지속 → 클릭 명령 전송: {addr}")
+                                print(f"[server] HP 0 60초 지속 → 클릭 명령 전송: {addr}")
                                 if _send_json(conn, {"cmd": "click", "x": 1080, "y": 174, "req_id": click_req_id}):
                                     ack = _recv_expected_response(
                                         conn,
@@ -218,9 +222,9 @@ def _handle_client(conn: socket.socket, addr: tuple):
                                     )
                                     if ack:
                                         print(f"[server] 클릭 ack 수신 from {addr}")
-                                        mp_zero_since = time.time()
+                                        hp_zero_since = time.time()
                     else:
-                        mp_zero_since = None
+                        hp_zero_since = None
             time.sleep(2)
     finally:
         _remove_client(client)
@@ -323,14 +327,43 @@ def exchange_loop():
     clients_snapshot = []
     _last_target_text = ''
     _last_target_first_seen = 0.0
-    _server_mp_zero_since: float | None = None
+    _server_hp_zero_since: float | None = None  # 서버 자신 HP 0 지속 시작 시각
     _hp_full_since: float | None = None   # heal 모드에서 HP 100% 도달 시각
     mode = "service"
     while running:
         img = macro.screenshot(hwnd=macro.lineage1_hwnd)
         current_hp, max_hp = macro.read_hp(img)
         _mp1 = macro.read_mp(img)
-        
+
+        # ── HP가 0인 상태가 60초 지속되면 자체 재접속 클릭 ────────────────
+        if current_hp == 0:
+            if _server_hp_zero_since is None:
+                _server_hp_zero_since = time.time()
+            elif time.time() - _server_hp_zero_since >= 60:
+                do_click = False
+                with _last_click_idx_lock:
+                    if time.time() - _last_click_idx_time.get(0, 0) >= 10:
+                        _last_click_idx_time[0] = time.time()
+                        do_click = True
+                if do_click:
+                    print("[server] 서버 HP 0 60초 지속 → 자체 클릭 실행")
+                    macro.force_set_foreground_window(macro.lineage1_hwnd)
+                    win32api.SetCursorPos((1080, 174))
+                    time.sleep(1)
+                    macro.arduino_mouse_click_left()
+                    time.sleep(2)
+                    macro.arduino_key_press(win32con.VK_F10)
+                    time.sleep(1)
+                    win32api.SetCursorPos((105, 85))
+                    time.sleep(1)
+                    macro.arduino_mouse_click_left()
+                    macro.arduino_mouse_click_left()
+                    time.sleep(2)
+                    macro._DIRECTION_FUNCS[macro.high_count_direction]()
+                    _server_hp_zero_since = time.time()
+        else:
+            _server_hp_zero_since = None
+
         # ── HP 100%가 아니면 heal 모드로 전환해 회복에 전념 ────────────────
         if current_hp != max_hp:
             print(f"[server] 현재 HP: {current_hp}/{max_hp}, MP: {_mp1}")
@@ -365,32 +398,6 @@ def exchange_loop():
         if stage == WAIT_NICKNAME:
             if _mp1 != 0:
                 macro.mp_1 = _mp1
-                _server_mp_zero_since = None
-            else:
-                if _server_mp_zero_since is None:
-                    _server_mp_zero_since = time.time()
-                elif time.time() - _server_mp_zero_since >= 60:
-                    do_click = False
-                    with _last_click_idx_lock:
-                        if time.time() - _last_click_idx_time.get(0, 0) >= 10:
-                            _last_click_idx_time[0] = time.time()
-                            do_click = True
-                    if do_click:
-                        print("[server] 서버 MP 0 1분 지속 → 자체 클릭 실행")
-                        macro.force_set_foreground_window(macro.lineage1_hwnd)
-                        win32api.SetCursorPos((1080, 174))
-                        time.sleep(1)
-                        macro.arduino_mouse_click_left()
-                        time.sleep(2)
-                        macro.arduino_key_press(win32con.VK_F10)
-                        time.sleep(1)
-                        win32api.SetCursorPos((105, 85))
-                        time.sleep(1)
-                        macro.arduino_mouse_click_left()
-                        macro.arduino_mouse_click_left()
-                        time.sleep(2)
-                        macro._DIRECTION_FUNCS(macro.high_count_direction)
-                        _server_mp_zero_since = time.time()
 
             with _clients_lock:
                 for e in _clients:
@@ -618,7 +625,7 @@ if __name__ == "__main__":
 
     # 서버 자신을 idx=0 으로 _clients에 등록 (conn/addr/lock 없음)
     with _clients_lock:
-        _clients.append({"idx": 0, "mp": 0, "available": 0, "potion_last_used": 0})
+        _clients.append({"idx": 0, "mp": 0, "hp": 0, "max_hp": 0, "available": 0, "potion_last_used": 0})
 
     print("\n명령어: q=종료, 1=exchange 시작, 2=exchange 중지")
     exchange_thread = None

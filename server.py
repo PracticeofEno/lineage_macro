@@ -22,7 +22,7 @@ PORT = 9999
 ACK_TIMEOUT = 10      # 픽업 ack 대기 최대 시간(초)
 SAME_UNIT_DELAY = 1   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
 POTION_COOLDOWN = 600 # 포션 쿨타임(초)
-HEAL_MP_COST = 5      # 힐 1회 시전에 필요한 MP. 이 값 미만이면 힐 대신 포션(F6) 사용
+HEAL_COOLDOWN = 0.5     # 같은 idx 클라이언트 간 heal 딜레이(초)
 
 # ── 클라이언트 관리 ───────────────────────────────────────────────────────────
 # client: {"conn": socket, "addr": tuple, "lock": Lock, "mp": int, "idx": int}
@@ -35,6 +35,9 @@ _request_id = 0
 _request_id_lock = threading.Lock()
 _last_click_idx_time: dict[int, float] = {}
 _last_click_idx_lock = threading.Lock()
+_last_heal_idx_time: dict[int, float] = {}
+_last_heal_idx_lock = threading.Lock()
+_server_hp_zero_since: float | None = None  # 서버 자신 HP 0 지속 시작 시각
 
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
@@ -81,6 +84,62 @@ def _remember_pong(client: dict | None, resp: dict):
     client["available"] = int(client["mp"] // 20)
 
 
+def _update_self_and_snapshot(mp_1: int, hp: int, max_hp: int) -> list[dict]:
+    """서버 자신(conn 없는 엔트리)의 MP/HP를 갱신하고 클라이언트 스냅샷을 반환한다.
+
+    ping/pong으로 갱신되지 않는 서버 자체 정보를 수동 갱신한 뒤 복사한다.
+    """
+    with _clients_lock:
+        for e in _clients:
+            if "conn" not in e:
+                e["mp"] = mp_1
+                e["hp"] = hp
+                e["max_hp"] = max_hp
+                e["available"] = int(mp_1 // 20)
+                break
+        return list(_clients)
+
+
+def _use_potions_for_clients(clients_snapshot: list[dict], last_potion_idx_time: dict):
+    """각 클라이언트에 대해 SAME_UNIT_DELAY를 지킨 뒤 포션 사용을 시도한다.
+
+    포션을 사용한 클라이언트의 마지막 사용 시각을 last_potion_idx_time에 기록한다.
+    """
+    for e in clients_snapshot:
+        elapsed = time.time() - last_potion_idx_time.get(e["idx"], 0)
+        if elapsed < SAME_UNIT_DELAY:
+            time.sleep(SAME_UNIT_DELAY - elapsed)
+        if _try_use_potion(e):
+            last_potion_idx_time[e["idx"]] = time.time()
+            if e["idx"] == 0 and "conn" in e:
+                time.sleep(0.5)
+                macro.force_set_foreground_window(macro.lineage1_hwnd)
+
+
+def _try_use_heal(client: dict) -> bool:
+    """max_hp != hp 인 클라이언트에 heal을 사용한다. (서버 로컬/원격 모두 처리)"""
+    if "conn" not in client:  # 서버 로컬
+        macro.heal()
+        return True
+    with client["lock"]:
+        return _send_heal_action(client["conn"], client)
+
+
+def _use_heal_for_clients(clients_snapshot: list[dict]):
+    """max_hp != hp 인 클라이언트를 찾아 heal을 사용한다. idx별 HEAL_COOLDOWN을 지킨다."""
+    for e in clients_snapshot:
+        if e.get("max_hp", 0) <= 0 or e["hp"] <= 0:
+            continue
+        if e["hp"] >= e["max_hp"]:
+            continue
+        with _last_heal_idx_lock:
+            if time.time() - _last_heal_idx_time.get(e["idx"], 0) < HEAL_COOLDOWN:
+                continue
+            _last_heal_idx_time[e["idx"]] = time.time()
+        print(f"[server] heal 사용 idx({e['idx']}): HP {e['hp']}/{e['max_hp']}")
+        _try_use_heal(e)
+
+
 def _recv_expected_response(
     conn: socket.socket,
     *,
@@ -109,6 +168,22 @@ def _recv_expected_response(
             print(f"[server] 다른 요청 응답 무시: {resp}")
     finally:
         conn.settimeout(None)
+
+
+def _send_heal_action(conn: socket.socket, client: dict) -> bool:
+    """heal 명령을 보내고 ack를 기다린다. (호출자가 client["lock"]을 이미 보유해야 함)
+    """
+    req_id = _next_request_id()
+    if not _send_json(conn, {"cmd": "heal", "req_id": req_id}):
+        return False
+    ack = _recv_expected_response(
+        conn,
+        req_id=req_id,
+        expected_status="ok",
+        timeout=ACK_TIMEOUT,
+        client=client,
+    )
+    return bool(ack)
 
 
 def _try_use_potion(client: dict) -> bool:
@@ -180,6 +255,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
 
     try:
         while True:
+            healing = False
             with client["lock"]:
                 req_id = _next_request_id()
                 if not _send_json(conn, {"cmd": "ping", "req_id": req_id}):
@@ -225,7 +301,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
                                         hp_zero_since = time.time()
                     else:
                         hp_zero_since = None
-            time.sleep(2)
+            time.sleep(0.5)
     finally:
         _remove_client(client)
 
@@ -299,6 +375,42 @@ def _broadcast_move_coord(from_dir: str, to_dir: str):
     print(f"[server] 좌표 브로드캐스트: {from_dir} → {to_dir}  (dx={dx:+}, dy={dy:+})")
 
 
+# ── 서버 자신 재접속 감시 ─────────────────────────────────────────────────────
+def checkRestartStatus(current_hp: int):
+    """서버 자신 HP가 0인 상태가 60초 지속되면 자체 재접속 클릭을 실행한다."""
+    global _server_hp_zero_since
+    if current_hp != 0:
+        _server_hp_zero_since = None
+        return
+    if _server_hp_zero_since is None:
+        _server_hp_zero_since = time.time()
+        return
+    if time.time() - _server_hp_zero_since < 60:
+        return
+
+    do_click = False
+    with _last_click_idx_lock:
+        if time.time() - _last_click_idx_time.get(0, 0) >= 10:
+            _last_click_idx_time[0] = time.time()
+            do_click = True
+    if do_click:
+        print("[server] 서버 HP 0 60초 지속 → 자체 클릭 실행")
+        macro.force_set_foreground_window(macro.lineage1_hwnd)
+        win32api.SetCursorPos((1080, 174))
+        time.sleep(1)
+        macro.arduino_mouse_click_left()
+        time.sleep(2)
+        macro.arduino_key_press(win32con.VK_F10)
+        time.sleep(1)
+        win32api.SetCursorPos((105, 85))
+        time.sleep(1)
+        macro.arduino_mouse_click_left()
+        macro.arduino_mouse_click_left()
+        time.sleep(2)
+        macro._DIRECTION_FUNCS[macro.high_count_direction]()
+        _server_hp_zero_since = time.time()
+
+
 # ── Exchange 루프 ──────────────────────────────────────────────────────────────
 def exchange_loop():
     global running, _client_coord_direction
@@ -327,103 +439,33 @@ def exchange_loop():
     clients_snapshot = []
     _last_target_text = ''
     _last_target_first_seen = 0.0
-    _server_hp_zero_since: float | None = None  # 서버 자신 HP 0 지속 시작 시각
-    _hp_full_since: float | None = None   # heal 모드에서 HP 100% 도달 시각
-    mode = "service"
+    
     while running:
         img = macro.screenshot(hwnd=macro.lineage1_hwnd)
         current_hp, max_hp = macro.read_hp(img)
-        _mp1 = macro.read_mp(img)
+        mp_1 = macro.read_mp(img)
 
         # ── HP가 0인 상태가 60초 지속되면 자체 재접속 클릭 ────────────────
-        if current_hp == 0:
-            if _server_hp_zero_since is None:
-                _server_hp_zero_since = time.time()
-            elif time.time() - _server_hp_zero_since >= 60:
-                do_click = False
-                with _last_click_idx_lock:
-                    if time.time() - _last_click_idx_time.get(0, 0) >= 10:
-                        _last_click_idx_time[0] = time.time()
-                        do_click = True
-                if do_click:
-                    print("[server] 서버 HP 0 60초 지속 → 자체 클릭 실행")
-                    macro.force_set_foreground_window(macro.lineage1_hwnd)
-                    win32api.SetCursorPos((1080, 174))
-                    time.sleep(1)
-                    macro.arduino_mouse_click_left()
-                    time.sleep(2)
-                    macro.arduino_key_press(win32con.VK_F10)
-                    time.sleep(1)
-                    win32api.SetCursorPos((105, 85))
-                    time.sleep(1)
-                    macro.arduino_mouse_click_left()
-                    macro.arduino_mouse_click_left()
-                    time.sleep(2)
-                    macro._DIRECTION_FUNCS[macro.high_count_direction]()
-                    _server_hp_zero_since = time.time()
-        else:
-            _server_hp_zero_since = None
+        checkRestartStatus(current_hp)
 
-        # ── HP 100%가 아니면 heal 모드로 전환해 회복에 전념 ────────────────
-        if current_hp != max_hp:
-            print(f"[server] 현재 HP: {current_hp}/{max_hp}, MP: {_mp1}")
-            _hp_full_since = None
-            if mode == "service":
-                macro.arduino_key_press(win32con.VK_F12)
-                macro.arduino_key_press(win32con.VK_F2)
-                mode = "heal"
-            if _mp1 >= HEAL_MP_COST:
-                macro.arduino_key_press(win32con.VK_F5)   # 힐 시전
-                macro.arduino_key_press(win32con.VK_F5)   # 힐 시전
-                time.sleep(0.1)
-            else:
-                macro.arduino_key_press(win32con.VK_F6)   # MP 부족 → 포션
-                time.sleep(0.3)
-            continue
-        else:
-            if mode == "heal":
-                # HP 100%가 30초 이상 지속되어야 service 모드로 복귀
-                if _hp_full_since is None:
-                    _hp_full_since = time.time()
-                if time.time() - _hp_full_since >= 30:
-                    macro.arduino_key_press(win32con.VK_F12)
-                    macro.arduino_key_press(win32con.VK_F1)
-                    mode = "service"
-                    _hp_full_since = None
-                else:
-                    time.sleep(0.5)
-                    continue
+        # server에 대한 정보는 ping, pong으로 갱신되지 않음으로 수동 갱신 후 복사
+        clients_snapshot = _update_self_and_snapshot(mp_1, current_hp, max_hp)
+
+        # heal 사용 로직 (max_hp != hp 인 클라이언트)
+        _use_heal_for_clients(clients_snapshot)
+
+        # 마나포션 사용 로직
+        _use_potions_for_clients(clients_snapshot, _last_potion_idx_time)
+        total_count = sum(e["available"] for e in clients_snapshot)
+
+        if time.time() - _last_status_print_time >= 3:
+            for e in clients_snapshot:
+                print(f"idx({e['idx']}): MP: {e['mp']}, HP: {e['hp']}/{e['max_hp']}, 잔여: {e['available']}")
+            print(f"총 {total_count}")
+            _last_status_print_time = time.time()
 
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
-            if _mp1 != 0:
-                macro.mp_1 = _mp1
-
-            with _clients_lock:
-                for e in _clients:
-                    if "conn" not in e:
-                        e["mp"] = macro.mp_1
-                        e["available"] = int(macro.mp_1 // 20)
-                        break
-                clients_snapshot = list(_clients)
-
-            for e in clients_snapshot:
-                elapsed = time.time() - _last_potion_idx_time.get(e["idx"], 0)
-                if elapsed < SAME_UNIT_DELAY:
-                    time.sleep(SAME_UNIT_DELAY - elapsed)
-                if _try_use_potion(e):
-                    _last_potion_idx_time[e["idx"]] = time.time()
-                    if e["idx"] == 0 and "conn" in e:
-                        time.sleep(0.5)
-                        macro.force_set_foreground_window(macro.lineage1_hwnd)
-
-            total_count = sum(e["available"] for e in clients_snapshot)
-            if time.time() - _last_status_print_time >= 3:
-                for e in clients_snapshot:
-                    print(f"idx({e['idx']}): MP: {e['mp']}, 잔여: {e['available']}")
-                print(f"총 {total_count}")
-                _last_status_print_time = time.time()
-
             if total_count < macro.direction_threshold:
                 if macro.current_direction != macro.low_count_direction:
                     macro.force_set_foreground_window(macro.lineage1_hwnd)

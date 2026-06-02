@@ -695,6 +695,17 @@ def use_potion():
     _arduino_send(f'KP,{win32con.VK_F8}')
 
 
+def heal():
+    force_set_foreground_window(lineage1_hwnd)
+    time.sleep(0.32)
+    arduino_key_press(win32con.VK_F12)
+    arduino_key_press(win32con.VK_F2)
+    arduino_key_press(win32con.VK_F5)
+    arduino_key_press(win32con.VK_F5)
+    arduino_key_press(win32con.VK_F12)
+    arduino_key_press(win32con.VK_F1)
+
+
 def pickup_lineage1(target_nickname: str | None = None):
     x, y = _mouse_xy
     force_set_foreground_window(lineage1_hwnd)
@@ -853,8 +864,9 @@ def read_mp(img=None) -> int:
     if img is None:
         img = screenshot()
     current, _ = read_bar_stat(img, "MP")
-    mp_1 = current
-    return current or 0
+    if current is not None:
+        mp_1 = current
+    return mp_1
 
 
 def readAdena() -> int:

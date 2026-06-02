@@ -83,6 +83,22 @@ def main():
     # coordstr -> Counter(digit): 같은 좌표문자열이 여러 숫자로 라벨되면(충돌) 경고.
     hp_raw = collections.defaultdict(collections.Counter)
     mp_raw = collections.defaultdict(collections.Counter)
+
+    # [누적 빌드] 기존 bar_templates.json 을 시드로 깐다. screenshots/ 에 일부 숫자가
+    # 없을 때 덮어쓰면 그 숫자가 사전에서 사라져 런타임 read_mp/read_hp 가 실패한다
+    # (예: MP 값에 0·8 이 없는 캡처로 재빌드하면 0·8 이 통째로 빠진다). 시드 후
+    # 새 관측을 더하므로 데이터를 추가할수록 커버리지가 늘기만 한다(절대 줄지 않음).
+    try:
+        with open("bar_templates.json", encoding="utf-8") as fp:
+            prev = json.load(fp)
+        for raw, stat in ((hp_raw, "HP"), (mp_raw, "MP")):
+            for s, d in prev.get(stat, {}).get("digits", {}).items():
+                raw[s][d] += 1
+        print(f"[build] 기존 사전 시드: HP {len(prev.get('HP', {}).get('digits', {}))}개, "
+              f"MP {len(prev.get('MP', {}).get('digits', {}))}개")
+    except FileNotFoundError:
+        pass
+
     for f, arr, hc, hm, mc, mm in records:
         if hc and hm:
             for i, d in enumerate(hc[::-1]):

@@ -22,7 +22,7 @@ PORT = 9999
 ACK_TIMEOUT = 10      # 픽업 ack 대기 최대 시간(초)
 SAME_UNIT_DELAY = 1   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
 POTION_COOLDOWN = 600 # 포션 쿨타임(초)
-HEAL_COOLDOWN = 0.5     # 같은 idx 클라이언트 간 heal 딜레이(초)
+HEAL_COOLDOWN = 0.8     # 같은 idx 클라이언트 간 heal 딜레이(초)
 
 # ── 클라이언트 관리 ───────────────────────────────────────────────────────────
 # client: {"conn": socket, "addr": tuple, "lock": Lock, "mp": int, "idx": int}
@@ -689,9 +689,4 @@ if __name__ == "__main__":
         if cmd == "2":
             running = False
         if cmd == "3":
-            macro.force_set_foreground_window(macro.lineage1_hwnd)
-            macro.arduino_key_press(win32con.VK_F10)
-            win32api.SetCursorPos((105, 85))
-            time.sleep(1)
-            macro.arduino_mouse_click_left()
-            macro.arduino_mouse_click_left()
+            macro.heal()

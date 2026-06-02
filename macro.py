@@ -613,7 +613,6 @@ def key_up(vk: int):
 def key_press(vk: int, duration: float = 0.05):
     arduino_key_press(vk, duration)
 
-
 def move_window(x: int, y: int):
     hwnd = get_hwnd()
     rect = win32gui.GetWindowRect(hwnd)
@@ -697,11 +696,13 @@ def use_potion():
 
 def heal():
     force_set_foreground_window(lineage1_hwnd)
-    time.sleep(0.32)
+    time.sleep(0.1)
     arduino_key_press(win32con.VK_F12)
     arduino_key_press(win32con.VK_F2)
-    arduino_key_press(win32con.VK_F5)
-    arduino_key_press(win32con.VK_F5)
+    arduino_key_press(win32con.VK_F6)
+    arduino_key_down(win32con.VK_F5)
+    time.sleep(0.55)
+    arduino_key_up(win32con.VK_F5)
     arduino_key_press(win32con.VK_F12)
     arduino_key_press(win32con.VK_F1)
 
@@ -854,7 +855,14 @@ def read_hp(img=None) -> int:
     global max_hp, current_hp
     if img is None:
         img = screenshot()
-    current_hp, max_hp = read_bar_stat(img, "HP")
+    cur, mx = read_bar_stat(img, "HP")
+    # 인식 실패(None) 시 직전 값을 유지한다. None 을 그대로 돌려주면 server 의
+    # max_hp/hp 비교(None <= 0)에서 TypeError 가 나 루프가 죽어 read 가 멈춘다.
+    if cur is not None:
+        current_hp = cur
+    if mx is not None:
+        max_hp = mx
+    print(f"[macro] HP 읽기: current={current_hp}, max={max_hp}")
     return current_hp, max_hp
 
 

@@ -1,0 +1,29 @@
+{
+    "current_direction": "north",
+    "adena_per_pickup": 150,
+    "low_count_direction": "southeast",
+    "high_count_direction": "northwest",
+    "blocked_list": [
+     ],
+    "mouse_x_y": [650, 350],
+    "turn_x_y_by_direction": {
+        "north":     [654, 292],
+        "northeast": [816, 302],
+        "east":      [770, 394],
+        "southeast": [810, 544],
+        "south":     [654, 584],
+        "southwest": [376, 528],
+        "west":      [336, 399],
+        "northwest": [429, 234]
+    },
+    "mouse_x_y_by_direction": {
+        "north":     [650, 350],
+        "northeast": [690, 370],
+        "east":      [730, 390],
+        "southeast": [690, 410],
+        "south":     [650, 430],
+        "southwest": [610, 410],
+        "west":      [570, 390],
+        "northwest": [610, 370]
+    }
+}

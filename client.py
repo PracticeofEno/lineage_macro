@@ -21,7 +21,8 @@ import macro
 
 SERVER_HOST = '112.185.118.218'  # ← 서버 IP로 변경
 SERVER_PORT = 9999
-RECONNECT_DELAY = 5  # 재연결 대기 시간(초)
+RECONNECT_DELAY = 5   # 재연결 대기 시간(초)
+HEAL_MP_COST = 5      # 힐 1회 시전에 필요한 MP. 이 값 미만이면 힐 대신 포션(F6) 사용
 
 if len(sys.argv) < 2:
     print("사용법: python client.py <idx>  (예: python client.py 1)")
@@ -30,7 +31,15 @@ CLIENT_IDX = int(sys.argv[1])
 
 running = False
 _conn_thread = None
+_heal_thread = None
 _recv_buffers: dict[socket.socket, bytes] = {}
+
+# heal 루프와 서버 명령 처리(_handle_command)가 동시에 게임에 입력하지 않도록 보호.
+# 서버는 단일 exchange_loop에서 직렬 처리되지만, 클라이언트는 명령 처리와 heal이
+# 별도 스레드라 락으로 직렬화한다.
+_input_lock = threading.Lock()
+_heal_mode = "service"               # "service" | "heal"
+_hp_full_since: float | None = None  # heal 모드에서 HP 100% 도달 시각
 
 
 def _send_json(conn: socket.socket, obj: dict) -> bool:
@@ -119,11 +128,52 @@ def _run(conn: socket.socket):
             print("[client] 서버 연결 끊김")
             break
 
-        resp = _handle_command(msg)
+        with _input_lock:
+            resp = _handle_command(msg)
         if resp is not None:
             if not _send_json(conn, resp):
                 print("[client] 응답 전송 실패")
                 break
+
+
+def _heal_loop():
+    """서버의 self-heal 로직과 동일.
+    HP가 100%가 아니면 heal 모드로 전환(F12→F2)해 회복에 전념하고,
+    MP가 충분하면 힐(F5)을, 부족하면 포션(F6)을 사용한다.
+    HP 100%가 30초 이상 지속되면 service 모드로 복귀(F12→F1).
+    """
+    global _heal_mode, _hp_full_since
+    while running:
+        sleep_after = 0.5  # 기본 폴링 간격
+        with _input_lock:
+            img = macro.screenshot()
+            current_hp, max_hp = macro.read_hp(img)
+            mp = macro.read_mp(img)
+            # ── HP 100%가 아니면 heal 모드로 전환해 회복에 전념 ────────────
+            if current_hp != max_hp:
+                print(f"[client] 현재 HP: {current_hp}/{max_hp}, MP: {mp}")
+                _hp_full_since = None
+                if _heal_mode == "service":
+                    macro.arduino_key_press(win32con.VK_F12)
+                    macro.arduino_key_press(win32con.VK_F2)
+                    _heal_mode = "heal"
+                if mp >= HEAL_MP_COST:
+                    macro.arduino_key_press(win32con.VK_F5)   # 힐 시전
+                    macro.arduino_key_press(win32con.VK_F5)   # 힐 시전
+                    sleep_after = 0.1
+                else:
+                    macro.arduino_key_press(win32con.VK_F6)   # MP 부족 → 포션
+                    sleep_after = 0.3
+            elif _heal_mode == "heal":
+                # HP 100%가 30초 이상 지속되어야 service 모드로 복귀
+                if _hp_full_since is None:
+                    _hp_full_since = time.time()
+                if time.time() - _hp_full_since >= 30:
+                    macro.arduino_key_press(win32con.VK_F12)
+                    macro.arduino_key_press(win32con.VK_F1)
+                    _heal_mode = "service"
+                    _hp_full_since = None
+        time.sleep(sleep_after)
 
 
 def _connect_loop():
@@ -164,7 +214,9 @@ if __name__ == "__main__":
                 running = True
                 _conn_thread = threading.Thread(target=_connect_loop, daemon=True)
                 _conn_thread.start()
-                print("[client] 연결 시작됨")
+                _heal_thread = threading.Thread(target=_heal_loop, daemon=True)
+                _heal_thread.start()
+                print("[client] 연결 시작됨 (self-heal 활성화)")
             else:
                 print("[client] 이미 실행 중")
         elif cmd == "2":

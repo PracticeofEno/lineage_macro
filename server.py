@@ -330,10 +330,10 @@ def exchange_loop():
         img = macro.screenshot(hwnd=macro.lineage1_hwnd)
         current_hp, max_hp = macro.read_hp(img)
         _mp1 = macro.read_mp(img)
-        print(f"[server] 현재 HP: {current_hp}/{max_hp}, MP: {_mp1}")
-
+        
         # ── HP 100%가 아니면 heal 모드로 전환해 회복에 전념 ────────────────
         if current_hp != max_hp:
+            print(f"[server] 현재 HP: {current_hp}/{max_hp}, MP: {_mp1}")
             _hp_full_since = None
             if mode == "service":
                 macro.arduino_key_press(win32con.VK_F12)

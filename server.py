@@ -22,6 +22,7 @@ PORT = 9999
 ACK_TIMEOUT = 10      # 픽업 ack 대기 최대 시간(초)
 SAME_UNIT_DELAY = 1   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
 POTION_COOLDOWN = 600 # 포션 쿨타임(초)
+HEAL_MP_COST = 5      # 힐 1회 시전에 필요한 MP. 이 값 미만이면 힐 대신 포션(F6) 사용
 
 # ── 클라이언트 관리 ───────────────────────────────────────────────────────────
 # client: {"conn": socket, "addr": tuple, "lock": Lock, "mp": int, "idx": int}
@@ -323,12 +324,44 @@ def exchange_loop():
     _last_target_text = ''
     _last_target_first_seen = 0.0
     _server_mp_zero_since: float | None = None
+    _hp_full_since: float | None = None   # heal 모드에서 HP 100% 도달 시각
+    mode = "service"
     while running:
+        img = macro.screenshot(hwnd=macro.lineage1_hwnd)
+        current_hp, max_hp = macro.read_hp(img)
+        _mp1 = macro.read_mp(img)
+
+        # ── HP 100%가 아니면 heal 모드로 전환해 회복에 전념 ────────────────
+        if current_hp != max_hp:
+            _hp_full_since = None
+            if mode == "service":
+                macro.arduino_key_press(win32con.VK_F12)
+                macro.arduino_key_press(win32con.VK_F2)
+                mode = "heal"
+            if _mp1 >= HEAL_MP_COST:
+                macro.arduino_key_press(win32con.VK_F5)   # 힐 시전
+                macro.arduino_key_press(win32con.VK_F5)   # 힐 시전
+                time.sleep(0.1)
+            else:
+                macro.arduino_key_press(win32con.VK_F6)   # MP 부족 → 포션
+                time.sleep(0.3)
+            continue
+        else:
+            if mode == "heal":
+                # HP 100%가 30초 이상 지속되어야 service 모드로 복귀
+                if _hp_full_since is None:
+                    _hp_full_since = time.time()
+                if time.time() - _hp_full_since >= 30:
+                    macro.arduino_key_press(win32con.VK_F12)
+                    macro.arduino_key_press(win32con.VK_F1)
+                    mode = "service"
+                    _hp_full_since = None
+                else:
+                    time.sleep(0.5)
+                    continue
+
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
-            img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-            _hp1 = macro.read_hp(img)
-            _mp1 = macro.read_mp(img)
             if _mp1 != 0:
                 macro.mp_1 = _mp1
                 _server_mp_zero_since = None

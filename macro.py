@@ -381,7 +381,8 @@ _mouse_xy: list[int] = [0, 0]  # 런타임 픽업 좌표 (방향 전환 시 갱�
 current_direction = 'north'
 available_count_1 = 0
 mp_1 = 0
-hp_1 = 0
+current_hp = 100
+max_hp = 100
 direction_threshold = 4
 adena_per_pickup = 150
 low_count_direction = 'southeast'
@@ -822,17 +823,20 @@ def read_bar_stat(image: Image.Image, stat: str) -> tuple[int | None, int | None
 
 def read_hp(img=None) -> int:
     """하단 빨간 HP 피통바에서 현재값을 읽는다. 실패 시 0."""
+    global max_hp, current_hp
     if img is None:
         img = screenshot()
-    current, _ = read_bar_stat(img, "HP")
-    return current or 0
+    current_hp, max_hp = read_bar_stat(img, "HP")
+    return current_hp, max_hp
 
 
 def read_mp(img=None) -> int:
     """하단 파란 MP 피통바에서 현재값을 읽는다. 실패 시 0."""
+    global mp_1
     if img is None:
         img = screenshot()
     current, _ = read_bar_stat(img, "MP")
+    mp_1 = current
     return current or 0
 
 

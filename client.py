@@ -62,8 +62,10 @@ def _handle_command(msg: dict) -> dict | None:
     req_id = msg.get("req_id")
 
     if cmd == "ping":
-        mp = macro.readMp()
-        print(f"[client] ping 수신 → MP: {mp}")
+        img = macro.screenshot()
+        hp = macro.read_hp(img)
+        mp = macro.read_mp(img)
+        print(f"[client] ping 수신 → HP: {hp}, MP: {mp}")
         return {"status": "pong", "mp": mp, "req_id": req_id}
 
     if cmd == "click":

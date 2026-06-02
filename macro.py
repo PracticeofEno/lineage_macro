@@ -381,6 +381,7 @@ _mouse_xy: list[int] = [0, 0]  # 런타임 픽업 좌표 (방향 전환 시 갱�
 current_direction = 'north'
 available_count_1 = 0
 mp_1 = 0
+hp_1 = 0
 direction_threshold = 4
 adena_per_pickup = 150
 low_count_direction = 'southeast'
@@ -707,19 +708,6 @@ def get_brightness(image: Image.Image) -> float:
     return float(arr.mean())
 
 
-def readMp(img=None) -> int:
-    if img is None:
-        img = screenshot()
-    for dx in (0, 5, 10):
-        cropped = crop(img, 976 + dx, 96, 100, 21)
-        text = read_text(cropped, 0, 0, (0xCC, 0xE3, 0xFF))
-        parts = text.split('/')
-        digits = ''.join(c for c in parts[0] if c.isdigit())
-        if digits:
-            return int(digits)
-    return 0
-
-
 # ── 하단 피통바 OCR (HP=빨간 바, MP=파란 바) ──────────────────────────────────
 # 상태창(우상단)이 가방 등으로 가려져도 항상 보이는 하단 바에서 HP/MP를 읽는다.
 # 각 숫자는 폭 10px 고정 셀에 그려진다. 셀 내부의 글자색 픽셀 좌표문자열을 만들어
@@ -832,18 +820,20 @@ def read_bar_stat(image: Image.Image, stat: str) -> tuple[int | None, int | None
     return current, maximum
 
 
-def read_hp2(img=None) -> tuple[int | None, int | None]:
-    """하단 빨간 HP 피통바에서 (현재값, 최대값)을 읽는다. 실패 시 (None, None)."""
+def read_hp(img=None) -> int:
+    """하단 빨간 HP 피통바에서 현재값을 읽는다. 실패 시 0."""
     if img is None:
         img = screenshot()
-    return read_bar_stat(img, "HP")
+    current, _ = read_bar_stat(img, "HP")
+    return current or 0
 
 
-def read_mp2(img=None) -> tuple[int | None, int | None]:
-    """하단 파란 MP 피통바에서 (현재값, 최대값)을 읽는다. 실패 시 (None, None)."""
+def read_mp(img=None) -> int:
+    """하단 파란 MP 피통바에서 현재값을 읽는다. 실패 시 0."""
     if img is None:
         img = screenshot()
-    return read_bar_stat(img, "MP")
+    current, _ = read_bar_stat(img, "MP")
+    return current or 0
 
 
 def readAdena() -> int:

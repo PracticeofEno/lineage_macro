@@ -78,8 +78,8 @@ HP_RECOVERY_F6_KEY_HOLD_SECONDS = 0.5
 HP_RECOVERY_F6_INTERVAL_SECONDS = 0.0
 HP_RECOVERY_F10_DELAY_SECONDS = 10.0
 HP_RECOVERY_READ_FAIL_LOG_INTERVAL_SECONDS = 5.0
-SERVER_PERIODIC_F5_INTERVAL_SECONDS = 20 * 60.0
-SERVER_PERIODIC_F5_HOLD_SECONDS = 0.5
+SERVER_FULL_MP_F5_HOLD_SECONDS = 0.5
+SERVER_FULL_MP_READ_FAIL_LOG_INTERVAL_SECONDS = 5.0
 
 # 자동 방향전환 후보로 쓰는 8방향 이름입니다. macro_data.json의 방향별 좌표 키와 맞아야 합니다.
 TURN_DIRECTIONS = (
@@ -103,6 +103,7 @@ _macro_data_write_lock = threading.Lock()
 _restart_shutdown_lock = threading.Lock()
 _restart_shutdown_started = False
 _last_hp_recovery_read_fail_log_time = 0.0
+_last_server_full_mp_read_fail_log_time = 0.0
 
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
@@ -361,6 +362,13 @@ def _read_server_hp_state(config: dict) -> dict[str, float | int | str] | None:
     return hp_reader.read_hp_state(config, img=img)
 
 
+def _read_server_mp_state(config: dict) -> dict[str, float | int | str] | None:
+    mp_read = config.get("mp_read", {})
+    capture_mode = str(mp_read.get("capture_mode", "window")).lower()
+    img = macro.screenshot(hwnd=macro.lineage1_hwnd) if capture_mode == "window" else None
+    return hp_reader.read_mp_state(config, img=img)
+
+
 def _press_server_recovery_key(vk: int, hold_seconds: float = HP_RECOVERY_KEY_HOLD_SECONDS) -> None:
     macro.force_set_foreground_window(macro.lineage1_hwnd)
     macro.arduino_key_down(vk)
@@ -370,17 +378,49 @@ def _press_server_recovery_key(vk: int, hold_seconds: float = HP_RECOVERY_KEY_HO
         macro.arduino_key_up(vk)
 
 
-def _press_server_periodic_f5() -> None:
+def _press_server_full_mp_f5(current: int, maximum: int) -> None:
     print(
-        f"[server] 서버 주기 F5 실행 - "
-        f"interval={SERVER_PERIODIC_F5_INTERVAL_SECONDS / 60:.1f}m, "
-        f"hold={SERVER_PERIODIC_F5_HOLD_SECONDS:.1f}s"
+        f"[server] 서버 풀MP F5 실행 - "
+        f"MP={current}/{maximum}, hold={SERVER_FULL_MP_F5_HOLD_SECONDS:.1f}s"
     )
-    _press_server_recovery_key(win32con.VK_F5, SERVER_PERIODIC_F5_HOLD_SECONDS)
+    _press_server_recovery_key(win32con.VK_F5, SERVER_FULL_MP_F5_HOLD_SECONDS)
 
 
 def _press_server_recovery_f6() -> None:
     _press_server_recovery_key(win32con.VK_F6, HP_RECOVERY_F6_KEY_HOLD_SECONDS)
+
+
+def _press_server_f5_if_mp_full() -> bool:
+    global _last_server_full_mp_read_fail_log_time
+
+    try:
+        config = _load_hp_recovery_config()
+        macro.force_set_foreground_window(macro.lineage1_hwnd)
+        mp_state = _read_server_mp_state(config)
+    except macro.RestartButtonClicked:
+        _request_restart_shutdown("server_full_mp_f5", click_server=False)
+        return True
+    except (OSError, RuntimeError, KeyError, ValueError) as exc:
+        now = time.time()
+        if now - _last_server_full_mp_read_fail_log_time >= SERVER_FULL_MP_READ_FAIL_LOG_INTERVAL_SECONDS:
+            print(f"[server] MP 읽기 실패 - full MP F5 skipped, error={exc}")
+            _last_server_full_mp_read_fail_log_time = now
+        return False
+
+    if mp_state is None:
+        now = time.time()
+        if now - _last_server_full_mp_read_fail_log_time >= SERVER_FULL_MP_READ_FAIL_LOG_INTERVAL_SECONDS:
+            print("[server] MP 읽기 실패 - full MP F5 skipped, state=None")
+            _last_server_full_mp_read_fail_log_time = now
+        return False
+
+    current = int(mp_state["current"])
+    maximum = int(mp_state["maximum"])
+    if maximum <= 0 or current < maximum:
+        return False
+
+    _press_server_full_mp_f5(current, maximum)
+    return True
 
 
 def _recover_server_hp_if_needed() -> bool:
@@ -868,7 +908,6 @@ def exchange_loop():
     _last_haste_check_time = 0
     _last_return_check_time = 0.0
     _last_shop_direction_force_time = time.time()
-    _last_server_periodic_f5_time = time.time() - SERVER_PERIODIC_F5_INTERVAL_SECONDS
     base_shop_direction = macro.high_count_direction
     shop_direction = base_shop_direction
     preferred_turn_direction = "northeast" if base_shop_direction == "southeast" else None
@@ -1015,17 +1054,6 @@ def exchange_loop():
         _sleep_interruptible(0.8)
         return True
 
-    def press_server_periodic_f5_if_due() -> bool:
-        nonlocal _last_server_periodic_f5_time
-
-        now = time.time()
-        if now - _last_server_periodic_f5_time < SERVER_PERIODIC_F5_INTERVAL_SECONDS:
-            return False
-
-        _press_server_periodic_f5()
-        _last_server_periodic_f5_time = time.time()
-        return True
-
     while running:
         if _request_f12_stop():
             break
@@ -1033,7 +1061,7 @@ def exchange_loop():
             if not running:
                 break
             continue
-        if stage == WAIT_NICKNAME and press_server_periodic_f5_if_due():
+        if _press_server_f5_if_mp_full():
             if _sleep_interruptible(0.2):
                 break
             continue
@@ -1442,6 +1470,10 @@ def exchange_loop():
                 if _request_f12_stop():
                     break
                 if _recover_server_hp_if_needed():
+                    if not running:
+                        break
+                    continue
+                if _press_server_f5_if_mp_full():
                     if not running:
                         break
                     continue

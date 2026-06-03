@@ -694,17 +694,21 @@ def use_potion():
     _arduino_send(f'KP,{win32con.VK_F8}')
 
 
-def heal():
+def heal_and_logout():
     force_set_foreground_window(lineage1_hwnd)
     time.sleep(0.1)
-    arduino_key_press(win32con.VK_F12)
-    arduino_key_press(win32con.VK_F2)
     arduino_key_press(win32con.VK_F6)
-    arduino_key_down(win32con.VK_F5)
-    time.sleep(0.55)
-    arduino_key_up(win32con.VK_F5)
-    arduino_key_press(win32con.VK_F12)
-    arduino_key_press(win32con.VK_F1)
+    arduino_key_down(win32con.VK_CONTROL)
+    arduino_key_down(ord('Q'))
+    arduino_key_up(ord('Q'))
+    arduino_key_up(win32con.VK_CONTROL)
+    time.sleep(0.1)
+    win32api.SetCursorPos((1123,167))
+    time.sleep(0.1)
+    arduino_mouse_click_left()
+    time.sleep(0.1)
+
+
 
 
 def pickup_lineage1(target_nickname: str | None = None):

@@ -119,7 +119,7 @@ def _use_potions_for_clients(clients_snapshot: list[dict], last_potion_idx_time:
 def _try_use_heal(client: dict) -> bool:
     """max_hp != hp 인 클라이언트에 heal을 사용한다. (서버 로컬/원격 모두 처리)"""
     if "conn" not in client:  # 서버 로컬
-        macro.heal()
+        macro.heal_and_logout()
         return True
     with client["lock"]:
         return _send_heal_action(client["conn"], client)

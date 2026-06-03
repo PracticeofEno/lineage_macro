@@ -541,6 +541,15 @@ def exchange_loop():
         local_entry = next((e for e in clients_snapshot if "conn" not in e), None)
         local_logged_out = local_entry is not None and local_entry.get("logout_at") is not None
 
+        # ── 서버 HP가 100%가 아니면 stage를 처음으로 되돌린다 ──────────────
+        if  current_hp != max_hp and stage != WAIT_NICKNAME:
+            print(f"[server] 서버 HP {current_hp}/{max_hp} (100% 아님) → stage 초기화")
+            stage = WAIT_NICKNAME
+            greeted_nickname = None
+            adena_before = None
+            prev_brightness = None
+            brightness_changed = False
+
         # ── HP가 0인 상태가 60초 지속되면 자체 재접속 클릭 ────────────────
         # (단, heal_and_logout 재접속 대기 중에는 죽음 판정 클릭을 하지 않는다)
         if not local_logged_out:
@@ -561,7 +570,7 @@ def exchange_loop():
                 print(f"idx({e['idx']}): MP: {e['mp']}, HP: {e['hp']}/{e['max_hp']}, 잔여: {e['available']}")
             print(f"총 {total_count}")
             _last_status_print_time = time.time()
-
+            
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
             if total_count < macro.direction_threshold:

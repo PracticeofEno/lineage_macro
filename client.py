@@ -70,7 +70,12 @@ def _handle_command(msg: dict) -> dict | None:
         return {"status": "pong", "mp": mp, "hp": current_hp, "max_hp": max_hp, "req_id": req_id}
 
     if cmd == "heal":
-        macro.heal()
+        macro.heal_and_logout()
+        return {"status": "ok", "req_id": req_id}
+
+    if cmd == "relogin":
+        print(f"[client] 재접속 명령 수신")
+        macro.relogin()
         return {"status": "ok", "req_id": req_id}
 
     if cmd == "click":

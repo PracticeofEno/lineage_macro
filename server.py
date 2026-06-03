@@ -23,6 +23,8 @@ ACK_TIMEOUT = 10      # 픽업 ack 대기 최대 시간(초)
 SAME_UNIT_DELAY = 1   # 같은 PC 내 클라이언트 간 픽업 딜레이(초)
 POTION_COOLDOWN = 600 # 포션 쿨타임(초)
 HEAL_COOLDOWN = 0.8     # 같은 idx 클라이언트 간 heal 딜레이(초)
+RELOGIN_DELAY = 60      # heal_and_logout 후 재접속까지 대기(초)
+RELOGIN_TIMEOUT = 60    # 재접속 명령 ack 대기 최대 시간(초)
 
 # ── 클라이언트 관리 ───────────────────────────────────────────────────────────
 # client: {"conn": socket, "addr": tuple, "lock": Lock, "mp": int, "idx": int}
@@ -37,6 +39,9 @@ _last_click_idx_time: dict[int, float] = {}
 _last_click_idx_lock = threading.Lock()
 _last_heal_idx_time: dict[int, float] = {}
 _last_heal_idx_lock = threading.Lock()
+_last_relogin_idx_time: dict[int, float] = {}
+_last_relogin_idx_lock = threading.Lock()
+RELOGIN_IDX_COOLDOWN = 5  # 같은 idx 클라이언트 간 relogin 딜레이(초)
 _server_hp_zero_since: float | None = None  # 서버 자신 HP 0 지속 시작 시각
 
 
@@ -106,6 +111,8 @@ def _use_potions_for_clients(clients_snapshot: list[dict], last_potion_idx_time:
     포션을 사용한 클라이언트의 마지막 사용 시각을 last_potion_idx_time에 기록한다.
     """
     for e in clients_snapshot:
+        if e.get("logout_at") is not None:  # 로그아웃 상태 → 재접속 대기 중
+            continue
         elapsed = time.time() - last_potion_idx_time.get(e["idx"], 0)
         if elapsed < SAME_UNIT_DELAY:
             time.sleep(SAME_UNIT_DELAY - elapsed)
@@ -126,8 +133,13 @@ def _try_use_heal(client: dict) -> bool:
 
 
 def _use_heal_for_clients(clients_snapshot: list[dict]):
-    """max_hp != hp 인 클라이언트를 찾아 heal을 사용한다. idx별 HEAL_COOLDOWN을 지킨다."""
+    """max_hp != hp 인 클라이언트를 찾아 heal_and_logout을 사용한다. idx별 HEAL_COOLDOWN을 지킨다.
+
+    heal_and_logout 후에는 logout_at을 기록하고, 재접속 전까지는 heal 대상에서 제외한다.
+    """
     for e in clients_snapshot:
+        if e.get("logout_at") is not None:  # 로그아웃 상태 → 재접속 대기 중
+            continue
         if e.get("max_hp", 0) <= 0 or e["hp"] <= 0:
             continue
         if e["hp"] >= e["max_hp"]:
@@ -136,8 +148,9 @@ def _use_heal_for_clients(clients_snapshot: list[dict]):
             if time.time() - _last_heal_idx_time.get(e["idx"], 0) < HEAL_COOLDOWN:
                 continue
             _last_heal_idx_time[e["idx"]] = time.time()
-        print(f"[server] heal 사용 idx({e['idx']}): HP {e['hp']}/{e['max_hp']}")
-        _try_use_heal(e)
+        print(f"[server] heal_and_logout 사용 idx({e['idx']}): HP {e['hp']}/{e['max_hp']}")
+        if _try_use_heal(e):
+            e["logout_at"] = time.time()
 
 
 def _recv_expected_response(
@@ -184,6 +197,61 @@ def _send_heal_action(conn: socket.socket, client: dict) -> bool:
         client=client,
     )
     return bool(ack)
+
+
+def _send_relogin(conn: socket.socket, client: dict) -> bool:
+    """relogin 명령을 보내고 ack를 기다린다. (호출자가 client["lock"]을 이미 보유해야 함)
+
+    클라이언트가 (287,322)→(1126,850) 클릭 후 HP/MP를 다시 읽고 F6을 누를 때까지
+    대기하므로 RELOGIN_TIMEOUT을 넉넉히 사용한다.
+    """
+    req_id = _next_request_id()
+    if not _send_json(conn, {"cmd": "relogin", "req_id": req_id}):
+        return False
+    ack = _recv_expected_response(
+        conn,
+        req_id=req_id,
+        expected_status="ok",
+        timeout=RELOGIN_TIMEOUT,
+        client=client,
+    )
+    return bool(ack)
+
+
+def _claim_relogin_slot(idx: int) -> bool:
+    """idx별 RELOGIN_IDX_COOLDOWN을 확인한다. 가능하면 시각을 기록하고 True를 반환."""
+    with _last_relogin_idx_lock:
+        if time.time() - _last_relogin_idx_time.get(idx, 0) < RELOGIN_IDX_COOLDOWN:
+            return False
+        _last_relogin_idx_time[idx] = time.time()
+        return True
+
+
+def _check_relogin(clients_snapshot: list[dict]):
+    """heal_and_logout 후 RELOGIN_DELAY가 지난 클라이언트(로컬/원격)를 재접속시킨다.
+
+    서버 로컬(conn 없음)은 macro.relogin()을 직접 실행하고,
+    원격 클라이언트는 relogin 명령을 보내 클라이언트가 재접속하게 한다.
+    idx별 RELOGIN_IDX_COOLDOWN을 지킨다.
+    """
+    for e in clients_snapshot:
+        logout_at = e.get("logout_at")
+        if logout_at is None or time.time() - logout_at < RELOGIN_DELAY:
+            continue
+        if not _claim_relogin_slot(e["idx"]):
+            continue
+
+        if "conn" not in e:  # 서버 로컬
+            print("[server] 서버 로컬 재접속 실행 (idx 0)")
+            macro.relogin()
+            e["logout_at"] = None
+        else:
+            print(f"[server] 재접속 명령 전송 → {e['addr']}")
+            with e["lock"]:
+                ok = _send_relogin(e["conn"], e)
+            if ok:
+                print(f"[server] 재접속 ack 수신 from {e['addr']}")
+                e["logout_at"] = None
 
 
 def _try_use_potion(client: dict) -> bool:
@@ -244,7 +312,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
         conn.close()
         return
 
-    client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "hp": 0, "max_hp": 0, "idx": idx, "available": 0, "potion_last_used": 0}
+    client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "hp": 0, "max_hp": 0, "idx": idx, "available": 0, "potion_last_used": 0, "logout_at": None}
     with _clients_lock:
         _clients.append(client)
 
@@ -255,6 +323,11 @@ def _handle_client(conn: socket.socket, addr: tuple):
 
     try:
         while True:
+            # ── heal_and_logout 상태면 ping/pong을 멈춘다 (재접속은 메인 루프가 처리) ──
+            if client.get("logout_at") is not None:
+                time.sleep(1)
+                continue
+
             healing = False
             with client["lock"]:
                 req_id = _next_request_id()
@@ -445,14 +518,23 @@ def exchange_loop():
         current_hp, max_hp = macro.read_hp(img)
         mp_1 = macro.read_mp(img)
 
-        # ── HP가 0인 상태가 60초 지속되면 자체 재접속 클릭 ────────────────
-        checkRestartStatus(current_hp)
-
         # server에 대한 정보는 ping, pong으로 갱신되지 않음으로 수동 갱신 후 복사
         clients_snapshot = _update_self_and_snapshot(mp_1, current_hp, max_hp)
 
-        # heal 사용 로직 (max_hp != hp 인 클라이언트)
+        # 서버 로컬이 heal_and_logout 상태인지 확인
+        local_entry = next((e for e in clients_snapshot if "conn" not in e), None)
+        local_logged_out = local_entry is not None and local_entry.get("logout_at") is not None
+
+        # ── HP가 0인 상태가 60초 지속되면 자체 재접속 클릭 ────────────────
+        # (단, heal_and_logout 재접속 대기 중에는 죽음 판정 클릭을 하지 않는다)
+        if not local_logged_out:
+            checkRestartStatus(current_hp)
+
+        # heal_and_logout 사용 로직 (max_hp != hp 인 클라이언트)
         _use_heal_for_clients(clients_snapshot)
+
+        # heal_and_logout 후 1분 지난 클라이언트(로컬/원격) 재접속
+        _check_relogin(clients_snapshot)
 
         # 마나포션 사용 로직
         _use_potions_for_clients(clients_snapshot, _last_potion_idx_time)
@@ -667,7 +749,7 @@ if __name__ == "__main__":
 
     # 서버 자신을 idx=0 으로 _clients에 등록 (conn/addr/lock 없음)
     with _clients_lock:
-        _clients.append({"idx": 0, "mp": 0, "hp": 0, "max_hp": 0, "available": 0, "potion_last_used": 0})
+        _clients.append({"idx": 0, "mp": 0, "hp": 0, "max_hp": 0, "available": 0, "potion_last_used": 0, "logout_at": None})
 
     print("\n명령어: q=종료, 1=exchange 시작, 2=exchange 중지")
     exchange_thread = None
@@ -689,4 +771,6 @@ if __name__ == "__main__":
         if cmd == "2":
             running = False
         if cmd == "3":
-            macro.heal()
+            macro.heal_and_logout()
+        if cmd == "4":
+            macro.relogin()

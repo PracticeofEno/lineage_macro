@@ -709,6 +709,36 @@ def heal_and_logout():
     time.sleep(0.1)
 
 
+def relogin(timeout: float = 40.0):
+    """heal_and_logout()로 로그아웃한 캐릭터를 재접속한다.
+
+    (287,322) → (1126,850) 순서로 클릭하여 재접속한 뒤, HP/MP 바가 다시
+    읽힐 때까지 대기하고 F6을 한 번 눌러 마무리한다.
+    """
+    force_set_foreground_window(lineage1_hwnd)
+    time.sleep(0.5)
+    win32api.SetCursorPos((287, 322))
+    time.sleep(0.3)
+    arduino_mouse_click_left()
+    time.sleep(0.3)
+    win32api.SetCursorPos((1126, 850))
+    time.sleep(0.3)
+    arduino_mouse_click_left()
+
+    # 접속 후 HP/MP 바가 다시 보일 때까지 대기
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        img = screenshot(hwnd=lineage1_hwnd)
+        hp_cur, _ = read_bar_stat(img, "HP")
+        mp_cur, _ = read_bar_stat(img, "MP")
+        if hp_cur is not None and mp_cur is not None:
+            print(f"[macro] 재접속 완료 - HP:{hp_cur}, MP:{mp_cur}")
+            break
+        time.sleep(1)
+    else:
+        print("[macro] 재접속 대기 시간 초과 - F6 진행")
+
+    arduino_key_press(win32con.VK_F6)
 
 
 def pickup_lineage1(target_nickname: str | None = None):

@@ -596,9 +596,9 @@ def exchange_loop():
                     _last_target_first_seen = 0.0
                 else:
                     if input_text == _last_target_text:
-                        if time.time() - _last_target_first_seen >= 60:
+                        if time.time() - _last_target_first_seen >= 300:
                             macro.add_to_blocked_list(input_text)
-                            print(f"[server] 60초 지속 타겟 → blocked_list 자동 추가: {input_text}")
+                            print(f"[server] 5분 지속 타겟 → blocked_list 자동 추가: {input_text}")
                             _last_target_text = ''
                             _last_target_first_seen = 0.0
                     else:

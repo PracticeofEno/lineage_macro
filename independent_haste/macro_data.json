@@ -10,31 +10,31 @@
         ],
         "northeast": [
             690,
-            360
+            350
         ],
         "east": [
             730,
-            380
+            400
         ],
         "southeast": [
             690,
-            400
+            420
         ],
         "south": [
             650,
-            420
+            440
         ],
         "southwest": [
             610,
-            400
+            420
         ],
         "west": [
             570,
-            380
+            400
         ],
         "northwest": [
             610,
-            360
+            350
         ]
     },
     "client_mouse_x_y": [
@@ -44,35 +44,35 @@
     "client_mouse_x_y_by_direction": {
         "north": [
             650,
-            350
+            340
         ],
         "northeast": [
             690,
-            342
+            350
         ],
         "east": [
             730,
-            390
+            400
         ],
         "southeast": [
             690,
-            439
+            420
         ],
         "south": [
             650,
-            430
+            440
         ],
         "southwest": [
             610,
-            444
+            420
         ],
         "west": [
             570,
-            390
+            400
         ],
         "northwest": [
             610,
-            342
+            350
         ]
     },
     "client_numbering_mouse_x_y": [
@@ -120,31 +120,17 @@
     ],
     "target_check_failed_message": "{nickname}님 정면에 위치해주시기 바랍니다.",
     "direction_change_nicknames": [
-        "질서유지",
-        "핑진시",
-        "헤이스트가게",
-        "가게여직원",
-        "빨강농장",
-        "보라농장",
-        "김남진",
-        "타쓰지",
-        "헤이왕m",
-        "헤이왕v",
         "오우거혁띠",
-        "골무스테파니",
-        "자판기3c",
-        "헤이런",
-        "헤이와썹맨",
-        "dsafjakdc",
-        "버프여신",
-        "너미뱌",
-        "방문환영",
-        "헤이로옷산다",
-        "윤짱",
-        "헤이로집산다",
-        "헤이로밥산다",
-        "코스",
-        "헤이로차산다"
+        "스컬지",
+        "도라에몽2",
+        "넥서스",
+        "손오공1",
+        "돌아돌아",
+        "커맨드센터",
+        "복실다람쥐",
+        "코스피5500",
+        "자판기1a",
+        "광현"
     ],
     "blocked_turn_directions": [
         "north",
@@ -153,43 +139,43 @@
         "west"
     ],
     "direction_threshold": 6,
-    "adena_per_pickup": 150,
-    "adena_three_pickup_price": 400,
-    "adena_six_pickup_price": 900,
+    "adena_per_pickup": 100,
+    "adena_three_pickup_price": 300,
+    "adena_six_pickup_price": 600,
     "current_direction": "north",
     "low_count_direction": "southeast",
     "high_count_direction": "northwest",
     "turn_north_xy": [
-        654,
-        292
+        650,
+        350
     ],
     "turn_northeast_xy": [
-        816,
-        302
+        690,
+        400
     ],
     "turn_east_xy": [
-        770,
-        394
+        730,
+        390
     ],
     "turn_southeast_xy": [
-        810,
-        544
+        690,
+        435
     ],
     "turn_south_xy": [
-        654,
-        584
+        650,
+        430
     ],
     "turn_southwest_xy": [
-        376,
-        528
+        610,
+        430
     ],
     "turn_west_xy": [
-        336,
-        399
+        570,
+        390
     ],
     "turn_northwest_xy": [
-        429,
-        234
+        610,
+        385
     ],
     "_comment_directions": "north, northeast, east, southeast, south, southwest, west, northwest"
 }

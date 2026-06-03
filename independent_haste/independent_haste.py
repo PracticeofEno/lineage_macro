@@ -29,7 +29,7 @@ _f12_stop_reported = False
 
 # 자주 바꾸는 운영 기준값입니다. 좌표/방향/가격은 macro_data.json에서 관리합니다.
 # 헤이스트 가능 횟수(current_available)가 이 값 이하이면 MP 포션(F8)을 사용합니다.
-LOW_MP_AVAILABLE_THRESHOLD = 4
+LOW_MP_AVAILABLE_THRESHOLD = 2
 
 # MP 포션을 한 번 사용한 뒤 다시 사용할 수 있을 때까지 기다리는 시간(초)입니다.
 POTION_COOLDOWN_SECONDS = 600.0
@@ -509,28 +509,12 @@ def input_lock():
                 msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
 
 
-def clear_chat_input() -> bool:
-    """Clear all visible chat input text, if any."""
-    img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-    input_text = macro.readInputText(img).strip()
-
+def clear_chat_input() -> None:
+    """우클릭 닉네임 확인 후 채팅 입력칸에 남은 글자를 지웁니다."""
     macro.arduino_key_down(win32con.VK_CONTROL)
-    deadline = time.time() + 0.2
-    while time.time() < deadline:
-        macro.arduino_key_press(win32con.VK_BACK)
+    macro.arduino_key_press(win32con.VK_BACK)
     macro.arduino_key_up(win32con.VK_CONTROL)
     time.sleep(0.1)
-
-    img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-    remaining_text = macro.readInputText(img).strip()
-    if remaining_text:
-        macro.arduino_key_down(win32con.VK_CONTROL)
-        deadline = time.time() + 0.2
-        while time.time() < deadline:
-            macro.arduino_key_press(win32con.VK_BACK)
-        macro.arduino_key_up(win32con.VK_CONTROL)
-        time.sleep(0.1)
-    return bool(input_text or remaining_text)
 
 
 def read_nickname_at_xy(check_xy: tuple[int, int]) -> str:
@@ -538,7 +522,6 @@ def read_nickname_at_xy(check_xy: tuple[int, int]) -> str:
     x, y = check_xy
     with input_lock():
         macro.force_set_foreground_window(macro.lineage1_hwnd)
-        clear_chat_input()
         macro.arduino_mouse_shift_click_right(x, y)
         time.sleep(0.15)
         img = macro.screenshot(hwnd=macro.lineage1_hwnd)

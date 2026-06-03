@@ -42,7 +42,7 @@
     "server_mouse_x_y_by_direction": {
         "north": [
             650,
-            340
+            330
         ],
         "northeast": [
             690,
@@ -54,7 +54,7 @@
         ],
         "southeast": [
             690,
-            390
+            420
         ],
         "south": [
             650,
@@ -79,8 +79,8 @@
     ],
     "client_mouse_x_y_by_direction": {
         "north": [
-            650,
-            360
+            610,
+            320
         ],
         "northeast": [
             650,
@@ -150,7 +150,7 @@
         ]
     },
     "haste_check_interval_seconds": 3.0,
-    "same_front_nickname_chat_seconds": 60.0,
+    "same_front_nickname_chat_seconds": 90.0,
     "same_front_nickname_chat_client_idx": 1,
     "same_front_nickname_chat_cooldown_seconds": 15.0,
     "same_front_nickname_client_message": "\"{nickname} .",
@@ -160,17 +160,26 @@
     ],
     "target_check_failed_message": "{nickname}님 정면에 위치해주시기 바랍니다.",
     "direction_change_nicknames": [
-        "넌남자도아녀",
-        "요정지기",
-        "xcas",
-        "용용기",
-        "너미뱌"
+        "넥서스",
+        "도라에몽2",
+        "손오공1",
+        "커맨드센터",
+        "돌아돌아",
+        "스컬지",
+        "디파일러",
+        "자연씨컵",
+        "nisa",
+        "됴뎌댜대",
+        "소소로로로",
+        "china",
+        "서은주"
     ],
     "blocked_turn_directions": [
         "north",
         "east",
         "south",
-        "west"
+        "west",
+        "southwest"
     ],
     "direction_threshold": 6,
     "adena_per_pickup": 150,

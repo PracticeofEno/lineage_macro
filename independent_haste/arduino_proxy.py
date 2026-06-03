@@ -10,7 +10,7 @@ if PROJECT_DIR not in sys.path:
 
 from macro_common.serial_proxy import run_serial_proxy
 
-SERIAL_PORT = "COM11"
+SERIAL_PORT = "COM3"
 BAUD_RATE = 115200
 PROXY_HOST = "127.0.0.1"
 PROXY_PORT = 9998

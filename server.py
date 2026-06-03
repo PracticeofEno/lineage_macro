@@ -6,6 +6,7 @@ server.py - Exchange 서버
 """
 
 import os
+from pathlib import Path
 import socket
 import threading
 import json
@@ -16,6 +17,7 @@ import win32con
 import win32gui
 
 import macro
+from hp_macro import hp_macro as hp_reader
 
 # 서버가 client.py 연결을 받을 IP입니다. 0.0.0.0은 현재 PC의 모든 네트워크에서 받겠다는 뜻입니다.
 HOST = '0.0.0.0'
@@ -64,10 +66,20 @@ SHOP_DIRECTION_FORCE_INTERVAL_SECONDS = 15.0
 DIRECTION_RETURN_CHECK_INTERVAL = 30.0
 
 # 거래창 슬롯 영역 평균 밝기가 이 값보다 크면 교환 OK 후보로 판단합니다.
-EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD = 120.0
+EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD = 110.0
 
 # 상대방 거래창에 아데나 외 이미지가 올라왔을 때 취소 후 입력할 안내 문구입니다.
 INVALID_TRADE_ITEM_MESSAGE = "아데나만 올려주세요."
+
+# 서버 HP가 풀피가 아니면 다른 매크로 입력보다 먼저 회복을 끝냅니다.
+HP_RECOVERY_CONFIG_PATH = Path(__file__).resolve().parent / "hp_macro" / "config.json"
+HP_RECOVERY_KEY_HOLD_SECONDS = 0.15
+HP_RECOVERY_F6_KEY_HOLD_SECONDS = 0.5
+HP_RECOVERY_F6_INTERVAL_SECONDS = 0.0
+HP_RECOVERY_F10_DELAY_SECONDS = 10.0
+HP_RECOVERY_READ_FAIL_LOG_INTERVAL_SECONDS = 5.0
+SERVER_PERIODIC_F5_INTERVAL_SECONDS = 20 * 60.0
+SERVER_PERIODIC_F5_HOLD_SECONDS = 0.5
 
 # 자동 방향전환 후보로 쓰는 8방향 이름입니다. macro_data.json의 방향별 좌표 키와 맞아야 합니다.
 TURN_DIRECTIONS = (
@@ -90,6 +102,7 @@ _clients_lock = threading.Lock()
 _macro_data_write_lock = threading.Lock()
 _restart_shutdown_lock = threading.Lock()
 _restart_shutdown_started = False
+_last_hp_recovery_read_fail_log_time = 0.0
 
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
@@ -337,6 +350,170 @@ def _handle_restart_watcher_click() -> None:
     _request_restart_shutdown("watcher", click_server=False)
 
 
+def _load_hp_recovery_config() -> dict:
+    return hp_reader.load_config(HP_RECOVERY_CONFIG_PATH)
+
+
+def _read_server_hp_state(config: dict) -> dict[str, float | int | str] | None:
+    hp_read = config.get("hp_read", {})
+    capture_mode = str(hp_read.get("capture_mode", "window")).lower()
+    img = macro.screenshot(hwnd=macro.lineage1_hwnd) if capture_mode == "window" else None
+    return hp_reader.read_hp_state(config, img=img)
+
+
+def _press_server_recovery_key(vk: int, hold_seconds: float = HP_RECOVERY_KEY_HOLD_SECONDS) -> None:
+    macro.force_set_foreground_window(macro.lineage1_hwnd)
+    macro.arduino_key_down(vk)
+    try:
+        time.sleep(hold_seconds)
+    finally:
+        macro.arduino_key_up(vk)
+
+
+def _press_server_periodic_f5() -> None:
+    print(
+        f"[server] 서버 주기 F5 실행 - "
+        f"interval={SERVER_PERIODIC_F5_INTERVAL_SECONDS / 60:.1f}m, "
+        f"hold={SERVER_PERIODIC_F5_HOLD_SECONDS:.1f}s"
+    )
+    _press_server_recovery_key(win32con.VK_F5, SERVER_PERIODIC_F5_HOLD_SECONDS)
+
+
+def _press_server_recovery_f6() -> None:
+    _press_server_recovery_key(win32con.VK_F6, HP_RECOVERY_F6_KEY_HOLD_SECONDS)
+
+
+def _recover_server_hp_if_needed() -> bool:
+    """서버 HP가 풀피가 아니면 F11 후 F6을 반복하고, 회복이 끝날 때까지 다른 입력을 막는다."""
+    global _last_hp_recovery_read_fail_log_time
+
+    try:
+        config = _load_hp_recovery_config()
+        macro.force_set_foreground_window(macro.lineage1_hwnd)
+        hp_state = _read_server_hp_state(config)
+    except macro.RestartButtonClicked:
+        _request_restart_shutdown("server_hp_recovery", click_server=False)
+        return True
+    except (OSError, RuntimeError, KeyError, ValueError) as exc:
+        now = time.time()
+        if now - _last_hp_recovery_read_fail_log_time >= HP_RECOVERY_READ_FAIL_LOG_INTERVAL_SECONDS:
+            print(f"[server] HP 읽기 실패 - recovery skipped, error={exc}")
+            _last_hp_recovery_read_fail_log_time = now
+        return False
+
+    if hp_state is None:
+        now = time.time()
+        if now - _last_hp_recovery_read_fail_log_time >= HP_RECOVERY_READ_FAIL_LOG_INTERVAL_SECONDS:
+            print("[server] HP 읽기 실패 - recovery skipped, state=None")
+            _last_hp_recovery_read_fail_log_time = now
+        return False
+
+    current = int(hp_state["current"])
+    maximum = int(hp_state["maximum"])
+    if maximum <= 0 or current >= maximum:
+        return False
+
+    print(f"[server] HP 회복 시작 - HP={current}/{maximum}, action=F11_then_F6")
+    _press_server_recovery_key(win32con.VK_F11)
+    if _sleep_interruptible(0.2):
+        return True
+
+    _press_server_recovery_f6()
+    if _sleep_interruptible(HP_RECOVERY_F6_INTERVAL_SECONDS):
+        return True
+
+    last_status_time = 0.0
+    while running:
+        if _request_f12_stop():
+            return True
+
+        try:
+            macro.force_set_foreground_window(macro.lineage1_hwnd)
+            hp_state = _read_server_hp_state(config)
+        except macro.RestartButtonClicked:
+            _request_restart_shutdown("server_hp_recovery", click_server=False)
+            return True
+        except (OSError, RuntimeError, KeyError, ValueError) as exc:
+            now = time.time()
+            if now - last_status_time >= 1.0:
+                print(f"[server] HP 회복 중 읽기 실패 - action=F6_continue, error={exc}")
+                last_status_time = now
+            _press_server_recovery_f6()
+            if _sleep_interruptible(HP_RECOVERY_F6_INTERVAL_SECONDS):
+                return True
+            continue
+
+        if hp_state is None:
+            now = time.time()
+            if now - last_status_time >= 1.0:
+                print("[server] HP 회복 중 읽기 실패 - action=F6_continue, state=None")
+                last_status_time = now
+            _press_server_recovery_f6()
+            if _sleep_interruptible(HP_RECOVERY_F6_INTERVAL_SECONDS):
+                return True
+            continue
+
+        current = int(hp_state["current"])
+        maximum = int(hp_state["maximum"])
+        if maximum > 0 and current >= maximum:
+            print(
+                f"[server] HP 풀피 확인 - HP={current}/{maximum}, "
+                f"F10 delay={HP_RECOVERY_F10_DELAY_SECONDS:.1f}s"
+            )
+            f10_deadline = time.time() + HP_RECOVERY_F10_DELAY_SECONDS
+            while running:
+                if _request_f12_stop():
+                    return True
+
+                remaining = f10_deadline - time.time()
+                if remaining <= 0:
+                    _press_server_recovery_key(win32con.VK_F10)
+                    print("[server] HP 회복 후 F10 복귀")
+                    return True
+
+                if _sleep_interruptible(min(0.5, remaining)):
+                    return True
+
+                try:
+                    hp_state = _read_server_hp_state(config)
+                except macro.RestartButtonClicked:
+                    _request_restart_shutdown("server_hp_recovery", click_server=False)
+                    return True
+                except (OSError, RuntimeError, KeyError, ValueError) as exc:
+                    now = time.time()
+                    if now - last_status_time >= 1.0:
+                        print(f"[server] F10 대기 중 HP 읽기 실패 - error={exc}")
+                        last_status_time = now
+                    continue
+
+                if hp_state is None:
+                    now = time.time()
+                    if now - last_status_time >= 1.0:
+                        print("[server] F10 대기 중 HP 읽기 실패 - state=None")
+                        last_status_time = now
+                    continue
+
+                current = int(hp_state["current"])
+                maximum = int(hp_state["maximum"])
+                if maximum > 0 and current < maximum:
+                    print(f"[server] F10 대기 중 HP 하락 - HP={current}/{maximum}, action=F6_continue")
+                    break
+
+            if not running:
+                return True
+            continue
+
+        now = time.time()
+        if now - last_status_time >= 1.0:
+            print(f"[server] HP 회복 중 - HP={current}/{maximum}, action=F6")
+            last_status_time = now
+        _press_server_recovery_f6()
+        if _sleep_interruptible(HP_RECOVERY_F6_INTERVAL_SECONDS):
+            return True
+
+    return True
+
+
 def _handle_client(conn: socket.socket, addr: tuple):
     # 첫 메시지로 클라이언트가 보낸 idx 수신
     conn.settimeout(10)
@@ -568,36 +745,18 @@ def _read_adena_after_exchange(adena_before: int | None, timeout: float = 6.0) -
             return last_value
 
 
-def _clear_chat_input() -> bool:
-    """Clear all visible chat input text, if any."""
-    img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-    input_text = macro.readInputText(img).strip()
-
+def _clear_chat_input() -> None:
     macro.arduino_key_down(win32con.VK_CONTROL)
-    deadline = time.time() + 0.2
-    while time.time() < deadline:
-        macro.arduino_key_press(win32con.VK_BACK)
+    macro.arduino_key_press(win32con.VK_BACK)
     macro.arduino_key_up(win32con.VK_CONTROL)
     time.sleep(0.1)
-
-    img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-    remaining_text = macro.readInputText(img).strip()
-    if remaining_text:
-        macro.arduino_key_down(win32con.VK_CONTROL)
-        deadline = time.time() + 0.2
-        while time.time() < deadline:
-            macro.arduino_key_press(win32con.VK_BACK)
-        macro.arduino_key_up(win32con.VK_CONTROL)
-        time.sleep(0.1)
-    return bool(input_text or remaining_text)
 
 
 def _read_nickname_at_xy(check_xy: tuple[int, int]) -> str:
     x, y = check_xy
     macro.force_set_foreground_window(macro.lineage1_hwnd)
-    _clear_chat_input()
     macro.arduino_mouse_shift_click_right(x, y)
-    time.sleep(0.15)
+    time.sleep(0.2)
 
     img = macro.screenshot(hwnd=macro.lineage1_hwnd)
     nickname = macro.readInputText(img).strip()
@@ -709,6 +868,7 @@ def exchange_loop():
     _last_haste_check_time = 0
     _last_return_check_time = 0.0
     _last_shop_direction_force_time = time.time()
+    _last_server_periodic_f5_time = time.time()
     base_shop_direction = macro.high_count_direction
     shop_direction = base_shop_direction
     preferred_turn_direction = "northeast" if base_shop_direction == "southeast" else None
@@ -855,9 +1015,28 @@ def exchange_loop():
         _sleep_interruptible(0.8)
         return True
 
+    def press_server_periodic_f5_if_due() -> bool:
+        nonlocal _last_server_periodic_f5_time
+
+        now = time.time()
+        if now - _last_server_periodic_f5_time < SERVER_PERIODIC_F5_INTERVAL_SECONDS:
+            return False
+
+        _press_server_periodic_f5()
+        _last_server_periodic_f5_time = time.time()
+        return True
+
     while running:
         if _request_f12_stop():
             break
+        if _recover_server_hp_if_needed():
+            if not running:
+                break
+            continue
+        if stage == WAIT_NICKNAME and press_server_periodic_f5_if_due():
+            if _sleep_interruptible(0.2):
+                break
+            continue
 
         # 이전 stage가 READ_ADENA 이상이었을 경우 WAIT_NICKNAME 복귀 시 TAB + 타겟 리셋
         if stage != prev_stage:
@@ -1262,6 +1441,10 @@ def exchange_loop():
             while remaining > 0 and running:
                 if _request_f12_stop():
                     break
+                if _recover_server_hp_if_needed():
+                    if not running:
+                        break
+                    continue
                 with_avail = [c for c in clients_snapshot if pickup_avail[id(c)] > 0]
                 if not with_avail:
                     break

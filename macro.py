@@ -1073,6 +1073,7 @@ def click_restart_if_visible(img: Image.Image | None = None, print_log: bool = T
 
 def start_restart_watcher(
     on_click=None,
+    should_click=None,
     interval: float = _RESTART_WATCH_INTERVAL_SECONDS,
     print_log: bool = True,
 ) -> None:
@@ -1088,6 +1089,9 @@ def start_restart_watcher(
         def _watch() -> None:
             while not stop_event.is_set():
                 try:
+                    if should_click is not None and not should_click():
+                        stop_event.wait(max(0.1, interval))
+                        continue
                     if click_restart_if_visible(print_log=print_log) and on_click is not None:
                         on_click()
                 except Exception as exc:

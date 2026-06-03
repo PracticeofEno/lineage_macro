@@ -35,13 +35,49 @@ _clients_lock = threading.Lock()
 _recv_buffers: dict[socket.socket, bytes] = {}
 _request_id = 0
 _request_id_lock = threading.Lock()
-_last_click_idx_time: dict[int, float] = {}
-_last_click_idx_lock = threading.Lock()
-_last_heal_idx_time: dict[int, float] = {}
-_last_heal_idx_lock = threading.Lock()
-_last_relogin_idx_time: dict[int, float] = {}
-_last_relogin_idx_lock = threading.Lock()
-RELOGIN_IDX_COOLDOWN = 5  # 같은 idx 클라이언트 간 relogin 딜레이(초)
+# ── idx 입력 자원 직렬화 ───────────────────────────────────────────────────────
+# idx = 물리 PC 1대 = 활성 입력(커서/포커스) 자원 1개.
+# click/heal/relogin/potion/pickup 등 모든 동작이 idx별 "단일" 타임스탬프를 공유하여,
+# 같은 idx에 대한 직전 동작 이후 각 동작의 최소 간격이 지나야 실행된다.
+# (이전에는 동작 종류별로 타이머가 분리돼 있어 같은 PC라도 종류가 다르면 연속 실행됐다.)
+_idx_last_action_time: dict[int, float] = {}
+_idx_action_lock = threading.Lock()
+RELOGIN_IDX_COOLDOWN = 5     # relogin 최소 간격(초)
+CLICK_IDX_COOLDOWN = 2       # 원격 클라이언트 HP0 클릭 최소 간격(초)
+SERVER_CLICK_COOLDOWN = 10   # 서버 자신 재접속 클릭 최소 간격(초)
+
+
+def _claim_idx_slot(idx: int, min_gap: float) -> bool:
+    """직전 동작 이후 min_gap이 지났으면 시각을 갱신하고 True를 반환(원자적).
+
+    '간격이 안 지났으면 건너뛴다'는 의미의 동작(heal/relogin/click)에서 사용한다.
+    """
+    with _idx_action_lock:
+        if time.time() - _idx_last_action_time.get(idx, 0) < min_gap:
+            return False
+        _idx_last_action_time[idx] = time.time()
+        return True
+
+
+def _wait_idx_slot(idx: int, min_gap: float):
+    """직전 동작 이후 min_gap이 지날 때까지 대기한다.
+
+    '간격을 채운 뒤 반드시 실행한다'는 의미의 동작(potion/pickup)에서 사용하며,
+    동작 후 _stamp_idx(idx)로 시각을 갱신해야 한다. (락을 쥔 채로 sleep하지 않는다)
+    """
+    while True:
+        with _idx_action_lock:
+            elapsed = time.time() - _idx_last_action_time.get(idx, 0)
+            if elapsed >= min_gap:
+                return
+            wait = min_gap - elapsed
+        time.sleep(wait)
+
+
+def _stamp_idx(idx: int):
+    """idx 동작 시각을 현재로 갱신한다."""
+    with _idx_action_lock:
+        _idx_last_action_time[idx] = time.time()
 _server_hp_zero_since: float | None = None  # 서버 자신 HP 0 지속 시작 시각
 
 
@@ -105,19 +141,21 @@ def _update_self_and_snapshot(mp_1: int, hp: int, max_hp: int) -> list[dict]:
         return list(_clients)
 
 
-def _use_potions_for_clients(clients_snapshot: list[dict], last_potion_idx_time: dict):
-    """각 클라이언트에 대해 SAME_UNIT_DELAY를 지킨 뒤 포션 사용을 시도한다.
+def _use_potions_for_clients(clients_snapshot: list[dict]):
+    """각 클라이언트에 대해 idx 입력 슬롯(SAME_UNIT_DELAY)을 확보한 뒤 포션 사용을 시도한다.
 
-    포션을 사용한 클라이언트의 마지막 사용 시각을 last_potion_idx_time에 기록한다.
+    포션이 실제로 필요/가능한 경우에만 슬롯을 점유하므로 불필요한 대기를 만들지 않는다.
     """
     for e in clients_snapshot:
         if e.get("logout_at") is not None:  # 로그아웃 상태 → 재접속 대기 중
             continue
-        elapsed = time.time() - last_potion_idx_time.get(e["idx"], 0)
-        if elapsed < SAME_UNIT_DELAY:
-            time.sleep(SAME_UNIT_DELAY - elapsed)
+        if e["available"] >= 2:  # 포션 불필요
+            continue
+        if time.time() - e["potion_last_used"] < POTION_COOLDOWN:  # 포션 쿨타임 중
+            continue
+        _wait_idx_slot(e["idx"], SAME_UNIT_DELAY)
         if _try_use_potion(e):
-            last_potion_idx_time[e["idx"]] = time.time()
+            _stamp_idx(e["idx"])
             if e["idx"] == 0 and "conn" in e:
                 time.sleep(0.5)
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
@@ -144,10 +182,8 @@ def _use_heal_for_clients(clients_snapshot: list[dict]):
             continue
         if e["hp"] >= e["max_hp"]:
             continue
-        with _last_heal_idx_lock:
-            if time.time() - _last_heal_idx_time.get(e["idx"], 0) < HEAL_COOLDOWN:
-                continue
-            _last_heal_idx_time[e["idx"]] = time.time()
+        if not _claim_idx_slot(e["idx"], HEAL_COOLDOWN):
+            continue
         print(f"[server] heal_and_logout 사용 idx({e['idx']}): HP {e['hp']}/{e['max_hp']}")
         if _try_use_heal(e):
             e["logout_at"] = time.time()
@@ -218,15 +254,6 @@ def _send_relogin(conn: socket.socket, client: dict) -> bool:
     return bool(ack)
 
 
-def _claim_relogin_slot(idx: int) -> bool:
-    """idx별 RELOGIN_IDX_COOLDOWN을 확인한다. 가능하면 시각을 기록하고 True를 반환."""
-    with _last_relogin_idx_lock:
-        if time.time() - _last_relogin_idx_time.get(idx, 0) < RELOGIN_IDX_COOLDOWN:
-            return False
-        _last_relogin_idx_time[idx] = time.time()
-        return True
-
-
 def _check_relogin(clients_snapshot: list[dict]):
     """heal_and_logout 후 RELOGIN_DELAY가 지난 클라이언트(로컬/원격)를 재접속시킨다.
 
@@ -238,7 +265,7 @@ def _check_relogin(clients_snapshot: list[dict]):
         logout_at = e.get("logout_at")
         if logout_at is None or time.time() - logout_at < RELOGIN_DELAY:
             continue
-        if not _claim_relogin_slot(e["idx"]):
+        if not _claim_idx_slot(e["idx"], RELOGIN_IDX_COOLDOWN):
             continue
 
         if "conn" not in e:  # 서버 로컬
@@ -353,12 +380,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
                         if hp_zero_since is None:
                             hp_zero_since = time.time()
                         elif time.time() - hp_zero_since >= 60:
-                            do_click = False
-                            with _last_click_idx_lock:
-                                if time.time() - _last_click_idx_time.get(idx, 0) >= 2:
-                                    _last_click_idx_time[idx] = time.time()
-                                    do_click = True
-                            if do_click:
+                            if _claim_idx_slot(idx, CLICK_IDX_COOLDOWN):
                                 click_req_id = _next_request_id()
                                 print(f"[server] HP 0 60초 지속 → 클릭 명령 전송: {addr}")
                                 if _send_json(conn, {"cmd": "click", "x": 1080, "y": 174, "req_id": click_req_id}):
@@ -461,12 +483,7 @@ def checkRestartStatus(current_hp: int):
     if time.time() - _server_hp_zero_since < 60:
         return
 
-    do_click = False
-    with _last_click_idx_lock:
-        if time.time() - _last_click_idx_time.get(0, 0) >= 10:
-            _last_click_idx_time[0] = time.time()
-            do_click = True
-    if do_click:
+    if _claim_idx_slot(0, SERVER_CLICK_COOLDOWN):
         print("[server] 서버 HP 0 60초 지속 → 자체 클릭 실행")
         macro.force_set_foreground_window(macro.lineage1_hwnd)
         win32api.SetCursorPos((1080, 174))
@@ -508,7 +525,6 @@ def exchange_loop():
     brightness_changed = False
     _last_type_string_time = 0
     _last_status_print_time = 0
-    _last_potion_idx_time: dict = {}
     clients_snapshot = []
     _last_target_text = ''
     _last_target_first_seen = 0.0
@@ -529,15 +545,15 @@ def exchange_loop():
         # (단, heal_and_logout 재접속 대기 중에는 죽음 판정 클릭을 하지 않는다)
         if not local_logged_out:
             checkRestartStatus(current_hp)
+        
+        # heal_and_logout 후 1분 지난 클라이언트(로컬/원격) 재접속
+        _check_relogin(clients_snapshot)
 
         # heal_and_logout 사용 로직 (max_hp != hp 인 클라이언트)
         _use_heal_for_clients(clients_snapshot)
 
-        # heal_and_logout 후 1분 지난 클라이언트(로컬/원격) 재접속
-        _check_relogin(clients_snapshot)
-
         # 마나포션 사용 로직
-        _use_potions_for_clients(clients_snapshot, _last_potion_idx_time)
+        _use_potions_for_clients(clients_snapshot)
         total_count = sum(e["available"] for e in clients_snapshot)
 
         if time.time() - _last_status_print_time >= 3:
@@ -673,9 +689,7 @@ def exchange_loop():
             # 매 라운드: 전체 중 available 최댓값 탐색
             #   → 공유자 여럿이면 idx 내림차순 모두 실행
             #   → 혼자면 해당 client만 실행
-            # 같은 idx는 SAME_UNIT_DELAY 이내 재전송 금지
-            last_idx_time: dict = {}
-
+            # 같은 idx는 SAME_UNIT_DELAY 이내 재전송 금지 (전역 idx 슬롯 공유)
             while remaining > 0:
                 with_avail = [c for c in clients_snapshot if pickup_avail[id(c)] > 0]
                 if not with_avail:
@@ -691,9 +705,7 @@ def exchange_loop():
                 for c in candidates:
                     if remaining <= 0:
                         break
-                    elapsed = time.time() - last_idx_time.get(c["idx"], 0)
-                    if elapsed < SAME_UNIT_DELAY:
-                        time.sleep(SAME_UNIT_DELAY - elapsed)
+                    _wait_idx_slot(c["idx"], SAME_UNIT_DELAY)
 
                     if "conn" not in c:
                         print(f"[서버 픽업 실행] - (남은 픽업: {remaining})")
@@ -703,7 +715,7 @@ def exchange_loop():
                         print(f"[서버 → 클라이언트 픽업] idx: {c['idx']} - (남은 픽업: {remaining})")
                         ok = _send_pickup(c, nickname=greeted_nickname)
 
-                    last_idx_time[c["idx"]] = time.time()
+                    _stamp_idx(c["idx"])
                     if ok:
                         remaining -= 1
                         pickup_avail[id(c)] -= 1

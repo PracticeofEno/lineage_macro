@@ -868,7 +868,7 @@ def exchange_loop():
     _last_haste_check_time = 0
     _last_return_check_time = 0.0
     _last_shop_direction_force_time = time.time()
-    _last_server_periodic_f5_time = time.time()
+    _last_server_periodic_f5_time = time.time() - SERVER_PERIODIC_F5_INTERVAL_SECONDS
     base_shop_direction = macro.high_count_direction
     shop_direction = base_shop_direction
     preferred_turn_direction = "northeast" if base_shop_direction == "southeast" else None

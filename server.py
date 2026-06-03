@@ -1061,11 +1061,6 @@ def exchange_loop():
             if not running:
                 break
             continue
-        if _press_server_f5_if_mp_full():
-            if _sleep_interruptible(0.2):
-                break
-            continue
-
         # 이전 stage가 READ_ADENA 이상이었을 경우 WAIT_NICKNAME 복귀 시 TAB + 타겟 리셋
         if stage != prev_stage:
             if stage == WAIT_NICKNAME and prev_stage is not None and prev_stage >= READ_ADENA:
@@ -1073,6 +1068,11 @@ def exchange_loop():
                 if _sleep_interruptible(0.3):
                     break
             prev_stage = stage
+
+        if stage == WAIT_NICKNAME and _press_server_f5_if_mp_full():
+            if _sleep_interruptible(0.2):
+                break
+            continue
 
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
@@ -1470,10 +1470,6 @@ def exchange_loop():
                 if _request_f12_stop():
                     break
                 if _recover_server_hp_if_needed():
-                    if not running:
-                        break
-                    continue
-                if _press_server_f5_if_mp_full():
                     if not running:
                         break
                     continue

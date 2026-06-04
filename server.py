@@ -601,7 +601,7 @@ def exchange_loop():
                     f"{total_count}방 가능 한방에 {macro.adena_per_pickup}아데나!",
                     f"헤이 {macro.adena_per_pickup}  6방 {macro.adena_per_pickup * 6}",
                 ]
-                macro.arduino_type_string(random.choice(_ad_formats))
+                # macro.arduino_type_string(random.choice(_ad_formats))
                 _last_type_string_time = time.time()
 
             nickname = macro.readExchangeNickname(img=img)
@@ -742,9 +742,9 @@ def exchange_loop():
             if win32gui.GetForegroundWindow() != macro.lineage1_hwnd:
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
             time.sleep(0.1)
-            if received > 0:
+            # if received > 0:
                 # display_name = greeted_nickname[:2] if len(greeted_nickname) > 2 else greeted_nickname
-                macro.arduino_type_string(f"감삼당~!")
+                # macro.arduino_type_string(f"감삼당~!")
 
             if macro.current_direction != macro.high_count_direction:
                 from_dir = macro.current_direction

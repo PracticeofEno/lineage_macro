@@ -191,6 +191,16 @@ def arduino_mouse_click_left():
     _arduino_send('CL')
 
 
+def arduino_mouse_left_down():
+    """마우스 좌버튼을 누른 채 유지한다(드래그 시작). 반드시 left_up과 짝지어 호출."""
+    _arduino_send('LD')
+
+
+def arduino_mouse_left_up():
+    """마우스 좌버튼을 뗀다(드래그 종료)."""
+    _arduino_send('LU')
+
+
 def arduino_mouse_click_right(x: int, y: int):
     _arduino_send('CR')
 
@@ -931,11 +941,88 @@ def readAdena() -> int:
         time.sleep(0.5)
 
 
+INIT_EXCHANGE_Y = 28    # 교환 창 init 위치에서 '이노궁수'가 읽히는 y
+                        #   (screenshots/20260604_112503_133886.png)
+AFTER_EXCHANGE_Y = 194  # 교환 창 이동 후 '이노궁수'가 읽히는 y
+                        #   (screenshots/after.png)
+EXCHANGE_DRAG_XY = (143, 43)  # 교환 창 타이틀바 드래그 잡는 지점
+
+
+def read_init_exchange(img=None) -> str:
+    """교환 창 좌상단(자기 슬롯) 닉네임을 읽는다.
+
+    readExchangeNickname()과 동일한 x 스캔 로직을 쓰되 y만 다르다.
+    (screenshots/20260604_112503_133886.png 에서 '이노궁수'가 읽히는 y=28)
+    """
+    if img is None:
+        img = screenshot()
+    return _read_exchange_nickname_img(img, INIT_EXCHANGE_Y)
+
+
+def find_exchange_nickname_y(img=None, nickname: str = '이노궁수') -> int | None:
+    """교환 창 좌상단 슬롯에서 nickname이 읽히는 y를 위에서부터 스캔해 반환한다.
+
+    readExchangeNickname()과 동일한 x 스캔(107→57) 로직을 y마다 적용한다.
+    찾지 못하면 None.
+    """
+    if img is None:
+        img = screenshot()
+    color = (255, 255, 255)
+    for y in range(0, 480):
+        best = ''
+        for x in range(107, 56, -5):
+            text = read_text(crop(img, x, y, 140, 24), 0, 0, color)
+            if len(text) > len(best):
+                best = text
+        if nickname in best:
+            return y
+    return None
+
+
+def drag_left(x1: int, y1: int, x2: int, y2: int, steps: int = 20, hold: float = 0.3):
+    """(x1,y1)에서 좌버튼을 누른 채 (x2,y2)까지 이동 후 떼는 드래그앤드랍.
+
+    커서 위치는 win32api.SetCursorPos로 정확히 옮기고, 버튼 누름/뗌만
+    Arduino HID(LD/LU)로 유지한다. (Arduino 상대이동 누적오차로 DD가 부정확했음)
+    """
+    win32api.SetCursorPos((x1, y1))
+    time.sleep(0.2)
+    arduino_mouse_left_down()
+    time.sleep(hold)
+    for i in range(1, steps + 1):
+        ix = int(x1 + (x2 - x1) * i / steps)
+        iy = int(y1 + (y2 - y1) * i / steps)
+        win32api.SetCursorPos((ix, iy))
+        time.sleep(0.02)
+    time.sleep(hold)
+    arduino_mouse_left_up()
+    time.sleep(0.1)
+
+
+def drag_init_exchange():
+    """교환 창을 init→after 만큼(차이 = AFTER_EXCHANGE_Y - INIT_EXCHANGE_Y) 아래로 옮긴다.
+
+    (143,43)을 좌클릭한 뒤 (143, 43 + y차이)까지 드래그앤드랍한다.
+    """
+    force_set_foreground_window(lineage1_hwnd)
+    diff = AFTER_EXCHANGE_Y - INIT_EXCHANGE_Y
+    sx, sy = EXCHANGE_DRAG_XY
+    print(f"[macro] 교환 창 드래그: ({sx},{sy}) → ({sx},{sy + diff})  (diff={diff})")
+    drag_left(sx, sy, sx, sy + diff)
+
+
 def readExchangeNickname(img=None):
     global _exchange_nickname_xy
     if img is None:
         img = screenshot()
     if _exchange_nickname_xy is None:
+        # 교환 창이 init(상단) 위치에 떠 있으면(=read_init_exchange로 닉네임이
+        # 읽히면) 먼저 정위치로 끌어내린 뒤 다시 스캔한다.
+        if read_init_exchange(img):
+            print("[macro] init 위치 교환 창 감지 → drag_init_exchange()")
+            drag_init_exchange()
+            time.sleep(0.1)
+            img = screenshot()
         _exchange_nickname_xy = findExchangeNicknameY(img)
         if _exchange_nickname_xy is None:
             return ''

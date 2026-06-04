@@ -544,6 +544,7 @@ def exchange_loop():
         # ── 서버 HP가 100%가 아니면 stage를 처음으로 되돌린다 ──────────────
         if  current_hp != max_hp and stage != WAIT_NICKNAME:
             print(f"[server] 서버 HP {current_hp}/{max_hp} (100% 아님) → stage 초기화")
+            macro._exchange_nickname_xy = None
             stage = WAIT_NICKNAME
             greeted_nickname = None
             adena_before = None
@@ -792,6 +793,6 @@ if __name__ == "__main__":
         if cmd == "2":
             running = False
         if cmd == "3":
-            macro.heal_and_logout()
-        if cmd == "4":
-            macro.relogin()
+            text = macro.readExchangeNickname()
+            print(text)
+

@@ -14,7 +14,8 @@
  *   MM,<x>,<y>      마우스 이동    (절대 좌표)
  *   CL              마우스 좌클릭  (이동 없이 현재 위치에서 클릭)
  *   CR              마우스 우클릭  (이동 없이 현재 위치에서 클릭)
- *   DD,<x1>,<y1>,<x2>,<y2>  드래그앤드롭 (x1,y1)→(x2,y2)
+ *   LD              마우스 좌버튼 누름 (떼지 않고 유지 - 드래그용)
+ *   LU              마우스 좌버튼 뗌
  *   RM,<dx>,<dy>    마우스 상대 이동
  *   BS,<n>          백스페이스 n 회
  *   INIT            마우스 커서를 (0,0) 으로 초기화
@@ -204,25 +205,15 @@ void processCommand(const String &cmd) {
         delay(50);
         Mouse.release(MOUSE_RIGHT);
 
-    // ── 드래그앤드롭 ──
-    } else if (action == "DD") {
-        // DD,x1,y1,x2,y2
-        int c2 = rest.indexOf(',');
-        int x1 = rest.substring(0, c2).toInt();
-        rest   = rest.substring(c2 + 1);
-        int c3 = rest.indexOf(',');
-        int y1 = rest.substring(0, c3).toInt();
-        rest   = rest.substring(c3 + 1);
-        int c4 = rest.indexOf(',');
-        int x2 = rest.substring(0, c4).toInt();
-        int y2 = rest.substring(c4 + 1).toInt();
-        moveTo(x1, y1);
-        delay(50);
+    // ── 마우스 좌버튼 누름 유지 (드래그 시작) ──
+    } else if (action == "LD") {
         Mouse.press(MOUSE_LEFT);
-        delay(100);
-        moveTo(x2, y2);
-        delay(50);
+        delay(10);
+
+    // ── 마우스 좌버튼 뗌 (드래그 종료) ──
+    } else if (action == "LU") {
         Mouse.release(MOUSE_LEFT);
+        delay(10);
 
     // ── 마우스 상대 이동 ──
     } else if (action == "RM") {

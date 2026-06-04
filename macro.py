@@ -1029,6 +1029,7 @@ def readExchangeNickname(img=None):
             return ''
         print(f"[macro] exchange nickname xy 세팅됨: {_exchange_nickname_xy}")
     _, y = _exchange_nickname_xy
+    print(f"[macro] 교환 창 닉네임 y={y}에서 읽기")
     return _read_exchange_nickname_img(img, y)
 
 

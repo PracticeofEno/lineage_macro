@@ -542,9 +542,11 @@ def exchange_loop():
         local_logged_out = local_entry is not None and local_entry.get("logout_at") is not None
 
         # ── 서버 HP가 100%가 아니면 stage를 처음으로 되돌린다 ──────────────
-        if  current_hp != max_hp and stage != WAIT_NICKNAME:
+        if  current_hp != max_hp:
             print(f"[server] 서버 HP {current_hp}/{max_hp} (100% 아님) → stage 초기화")
-            macro._exchange_nickname_xy = None
+            if macro._exchange_nickname_xy is not None:
+                macro._exchange_nickname_xy = None
+                print(f"[server] 교환 창 닉네임 좌표 초기화")
             stage = WAIT_NICKNAME
             greeted_nickname = None
             adena_before = None

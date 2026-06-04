@@ -16,7 +16,7 @@ if TOOLS_DIR not in sys.path:
     sys.path.insert(0, TOOLS_DIR)
 
 from macro_common.arduino_tcp import ArduinoProxyClient
-from macro_common.chat import ChatTyper
+from macro_common.chat import CHAT_INPUT_ENABLED, ChatTyper
 from macro_common.windowing import WindowTarget, focus_window
 
 DEFAULT_CONFIG_PATH = os.path.join(BASE_DIR, "server_chat_macro.json")
@@ -146,6 +146,9 @@ class ServerChatMacro:
         message = text.strip()
         if not message:
             raise RuntimeError("message is empty")
+        if not CHAT_INPUT_ENABLED:
+            print(f"[chat] input disabled; skipped: {message}")
+            return
 
         hwnd, title = self._window_target.resolve()
         focus_window(hwnd)
@@ -162,6 +165,8 @@ class ServerChatMacro:
         self.send_message(messages[index - 1])
 
     def start_repeat(self, interval_seconds: float | None = None) -> None:
+        if not CHAT_INPUT_ENABLED:
+            raise RuntimeError("chat input disabled")
         interval = (
             self._config.default_interval_seconds
             if interval_seconds is None

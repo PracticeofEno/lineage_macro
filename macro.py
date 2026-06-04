@@ -24,6 +24,8 @@ import hangul
 _BASE = os.path.dirname(os.path.abspath(__file__))
 _CONVERTED_DATA_PATH = os.path.join(_BASE, "converted_data.json")
 _TARGET_CHECK_FAILURES_PATH = os.path.join(_BASE, "target_check_failures.json")
+# 자동 채팅 입력을 전역으로 막습니다.
+CHAT_INPUT_ENABLED = False
 with open(_CONVERTED_DATA_PATH, encoding="utf-8") as _f:
     _converted_map: dict[str, str] = json.load(_f)
 
@@ -227,6 +229,9 @@ def _arduino_send_hangul(ch: str):
 
 def arduino_type_string(text: str):
     """문자열을 Arduino HID를 통해 한 글자씩 입력한다. 한글/영문/숫자/특수문자 지원."""
+    if not CHAT_INPUT_ENABLED:
+        return
+
     VK_HANGUL = 0x15
     korean_mode = True  # 현재 입력 모드 (False=영어, True=한글)
 

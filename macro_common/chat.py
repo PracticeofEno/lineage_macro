@@ -8,6 +8,7 @@ except ImportError:  # pragma: no cover - used when tools/ is added directly to 
     import hangul
 
 VK_HANGUL = 0x15
+CHAT_INPUT_ENABLED = False
 
 _SHIFT_CHAR_MAP = {
     "!": "1",
@@ -41,6 +42,9 @@ class ChatTyper:
         self._send_enter = send_enter
 
     def type_text(self, text: str) -> None:
+        if not CHAT_INPUT_ENABLED:
+            return
+
         current_korean_mode = self._starts_in_korean_mode
 
         def set_mode(need_korean: bool) -> None:

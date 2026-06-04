@@ -17,7 +17,7 @@ if TOOLS_DIR not in sys.path:
     sys.path.insert(0, TOOLS_DIR)
 
 from macro_common.arduino_tcp import ArduinoProxyClient
-from macro_common.chat import ChatTyper
+from macro_common.chat import CHAT_INPUT_ENABLED, ChatTyper
 from macro_common.windowing import WindowTarget, focus_window
 
 DEFAULT_CONFIG_PATH = os.path.join(BASE_DIR, "dual_chat_macro.json")
@@ -195,6 +195,9 @@ class DualChatMacro:
         message = text.strip()
         if not message:
             raise RuntimeError("message is empty")
+        if not CHAT_INPUT_ENABLED:
+            print(f"[chat] input disabled; skipped {role}: {message}")
+            return
 
         hwnd, title = self._targets[role].resolve()
         focus_window(hwnd)
@@ -224,6 +227,8 @@ class DualChatMacro:
         self.send_message(role, messages[index - 1])
 
     def start_repeat(self, interval_seconds: float | None = None) -> None:
+        if not CHAT_INPUT_ENABLED:
+            raise RuntimeError("chat input disabled")
         interval = self._config.cycle_interval_seconds if interval_seconds is None else interval_seconds
         messages_by_role = {role: list(target.messages) for role, target in self._config.targets.items()}
         self._repeater.start(self._config.order, messages_by_role, interval)

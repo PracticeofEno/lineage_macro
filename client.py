@@ -121,6 +121,9 @@ def _handle_command(msg: dict) -> dict | None:
         if not message:
             return {"status": "ok"}
         logs = [f"채팅 명령 수신 - message={message}"]
+        if not getattr(macro, "CHAT_INPUT_ENABLED", True):
+            logs.append("채팅 입력 비활성화 - skipped")
+            return {"status": "ok", "logs": logs}
         macro.force_set_foreground_window(macro.lineage1_hwnd)
         time.sleep(CHAT_FOCUS_SETTLE_SECONDS)
         macro.arduino_type_string(message)

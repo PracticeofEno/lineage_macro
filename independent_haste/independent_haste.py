@@ -655,6 +655,8 @@ class IndependentHasteMacro:
             return macro.turn_to(direction, force=force)
 
     def type_string(self, text: str) -> None:
+        if not getattr(macro, "CHAT_INPUT_ENABLED", True):
+            return
         with input_lock():
             macro.force_set_foreground_window(macro.lineage1_hwnd)
             macro.arduino_type_string(text)

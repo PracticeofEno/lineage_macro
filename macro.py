@@ -840,6 +840,50 @@ def force_set_foreground_window(hwnd: int):
     win32gui.SetForegroundWindow(hwnd)
     time.sleep(0.05)
 
+
+def activate_window_for_input(hwnd: int, *, click_titlebar: bool = False) -> bool:
+    """Bring a window forward and optionally click its title bar.
+
+    Some game windows do not accept HID keyboard input until they receive an
+    activation click.  Clicking the title bar avoids touching the game area.
+    """
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, 9)  # SW_RESTORE
+    windll.user32.keybd_event(0, 0, 0, 0)
+
+    attached_threads: list[int] = []
+    current_thread = windll.kernel32.GetCurrentThreadId()
+    target_thread, _ = win32process.GetWindowThreadProcessId(hwnd)
+    foreground = win32gui.GetForegroundWindow()
+    foreground_thread = 0
+    if foreground:
+        foreground_thread, _ = win32process.GetWindowThreadProcessId(foreground)
+
+    try:
+        for thread_id in (foreground_thread, target_thread):
+            if thread_id and thread_id != current_thread and thread_id not in attached_threads:
+                if windll.user32.AttachThreadInput(current_thread, thread_id, True):
+                    attached_threads.append(thread_id)
+        win32gui.BringWindowToTop(hwnd)
+        win32gui.SetForegroundWindow(hwnd)
+    finally:
+        for thread_id in reversed(attached_threads):
+            windll.user32.AttachThreadInput(current_thread, thread_id, False)
+
+    if click_titlebar:
+        left, top, right, _ = win32gui.GetWindowRect(hwnd)
+        x = min(max(left + 80, left + 8), right - 8)
+        y = top + 10
+        win32api.SetCursorPos((x, y))
+        time.sleep(0.03)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+        time.sleep(0.02)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+
+    time.sleep(0.05)
+    return win32gui.GetForegroundWindow() == hwnd
+
+
 def arduino_mouse_move_rel(dx: int, dy: int):
     return _arduino_send(f"RM,{dx},{dy}")
 

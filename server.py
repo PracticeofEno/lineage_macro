@@ -472,21 +472,34 @@ def _read_server_mp_state(config: dict) -> dict[str, float | int | str] | None:
     return hp_reader.read_mp_state(config, img=img)
 
 
-def _press_server_recovery_key(vk: int, hold_seconds: float = HP_RECOVERY_KEY_HOLD_SECONDS) -> None:
-    macro.force_set_foreground_window(macro.lineage1_hwnd)
+def _press_server_recovery_key(
+    vk: int,
+    hold_seconds: float = HP_RECOVERY_KEY_HOLD_SECONDS,
+    *,
+    click_titlebar: bool = False,
+) -> bool:
+    focused = macro.activate_window_for_input(macro.lineage1_hwnd, click_titlebar=click_titlebar)
+    if not focused:
+        print(f"[server] 서버창 포커스 실패 - key skipped: vk={vk}")
+        return False
     macro.arduino_key_down(vk)
     try:
         time.sleep(hold_seconds)
     finally:
         macro.arduino_key_up(vk)
+    return True
 
 
-def _press_server_full_mp_f5(current: int, maximum: int) -> None:
+def _press_server_full_mp_f5(current: int, maximum: int) -> bool:
     print(
         f"[server] 서버 풀MP F5 실행 - "
         f"MP={current}/{maximum}, hold={SERVER_FULL_MP_F5_HOLD_SECONDS:.1f}s"
     )
-    _press_server_recovery_key(win32con.VK_F5, SERVER_FULL_MP_F5_HOLD_SECONDS)
+    return _press_server_recovery_key(
+        win32con.VK_F5,
+        SERVER_FULL_MP_F5_HOLD_SECONDS,
+        click_titlebar=True,
+    )
 
 
 def _press_server_recovery_f6() -> None:
@@ -522,8 +535,7 @@ def _press_server_f5_if_mp_full() -> bool:
     if maximum <= 0 or current < maximum:
         return False
 
-    _press_server_full_mp_f5(current, maximum)
-    return True
+    return _press_server_full_mp_f5(current, maximum)
 
 
 def _recover_server_hp_if_needed(*, allow_when_macro_stopped: bool = False) -> bool:

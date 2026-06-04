@@ -574,6 +574,7 @@ def exchange_loop():
             
         # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
+            img = macro.screenshot(hwnd=macro.lineage1_hwnd)
             if total_count < macro.direction_threshold:
                 if macro.current_direction != macro.low_count_direction:
                     macro.force_set_foreground_window(macro.lineage1_hwnd)

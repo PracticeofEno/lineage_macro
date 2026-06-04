@@ -956,8 +956,9 @@ def read_init_exchange(img=None) -> str:
     """
     if img is None:
         img = screenshot()
-    return _read_exchange_nickname_img(img, INIT_EXCHANGE_Y)
-
+    text =  _read_exchange_nickname_img(img, INIT_EXCHANGE_Y)
+    print(f"[macro] init 위치 닉네임 읽기: '{text}'")
+    return text
 
 def find_exchange_nickname_y(img=None, nickname: str = '이노궁수') -> int | None:
     """교환 창 좌상단 슬롯에서 nickname이 읽히는 y를 위에서부터 스캔해 반환한다.

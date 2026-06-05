@@ -810,7 +810,7 @@ def detect_restart_menu(img: Image.Image = None) -> bool:
     x, y, w, h = _RESTART_PANEL_BOX
     arr = np.array(crop(img, x, y, w, h).convert('RGB'), dtype=np.float32)
     brightness = float(arr.mean())
-    ch_spread = float(arr.reshape(-1, 3).mean(0).ptp())  # 채널 평균 최대-최소
+    ch_spread = float(np.ptp(arr.reshape(-1, 3).mean(0)))  # 채널 평균 최대-최소
     return brightness < _RESTART_MAX_BRIGHTNESS and ch_spread < _RESTART_MAX_CHANNEL_SPREAD
 
 

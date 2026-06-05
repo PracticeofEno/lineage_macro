@@ -173,7 +173,9 @@ def _try_use_heal(client: dict) -> bool:
 def _use_heal_for_clients(clients_snapshot: list[dict]):
     """max_hp != hp 인 클라이언트를 찾아 heal_and_logout을 사용한다. idx별 HEAL_COOLDOWN을 지킨다.
 
-    heal_and_logout 후에는 logout_at을 기록하고, 재접속 전까지는 heal 대상에서 제외한다.
+    원격 클라이언트는 heal_and_logout 후 logout_at을 기록해 _check_relogin이 재접속시킨다.
+    서버 로컬은 relogin하지 않으므로 logout_at을 기록하지 않고, HP 0 지속을 감지하는
+    checkRestartStatus가 복귀를 담당한다.
     """
     for e in clients_snapshot:
         if e.get("logout_at") is not None:  # 로그아웃 상태 → 재접속 대기 중
@@ -186,7 +188,8 @@ def _use_heal_for_clients(clients_snapshot: list[dict]):
             continue
         print(f"[server] heal_and_logout 사용 idx({e['idx']}): HP {e['hp']}/{e['max_hp']}")
         if _try_use_heal(e):
-            e["logout_at"] = time.time()
+            if "conn" in e:  # 원격 클라이언트만 재접속 대기 상태로 전환
+                e["logout_at"] = time.time()
 
 
 def _recv_expected_response(
@@ -255,30 +258,27 @@ def _send_relogin(conn: socket.socket, client: dict) -> bool:
 
 
 def _check_relogin(clients_snapshot: list[dict]):
-    """heal_and_logout 후 RELOGIN_DELAY가 지난 클라이언트(로컬/원격)를 재접속시킨다.
+    """heal_and_logout 후 RELOGIN_DELAY가 지난 원격 클라이언트를 재접속시킨다.
 
-    서버 로컬(conn 없음)은 macro.relogin()을 직접 실행하고,
-    원격 클라이언트는 relogin 명령을 보내 클라이언트가 재접속하게 한다.
-    idx별 RELOGIN_IDX_COOLDOWN을 지킨다.
+    원격 클라이언트에 relogin 명령을 보내 클라이언트가 재접속하게 한다.
+    서버 로컬은 relogin하지 않으므로(checkRestartStatus가 복귀 담당) logout_at이
+    기록되지 않아 여기서 처리 대상이 되지 않는다. idx별 RELOGIN_IDX_COOLDOWN을 지킨다.
     """
     for e in clients_snapshot:
         logout_at = e.get("logout_at")
         if logout_at is None or time.time() - logout_at < RELOGIN_DELAY:
             continue
+        if "conn" not in e:  # 서버 로컬은 relogin하지 않음
+            continue
         if not _claim_idx_slot(e["idx"], RELOGIN_IDX_COOLDOWN):
             continue
 
-        if "conn" not in e:  # 서버 로컬
-            print("[server] 서버 로컬 재접속 실행 (idx 0)")
-            macro.relogin()
+        print(f"[server] 재접속 명령 전송 → {e['addr']}")
+        with e["lock"]:
+            ok = _send_relogin(e["conn"], e)
+        if ok:
+            print(f"[server] 재접속 ack 수신 from {e['addr']}")
             e["logout_at"] = None
-        else:
-            print(f"[server] 재접속 명령 전송 → {e['addr']}")
-            with e["lock"]:
-                ok = _send_relogin(e["conn"], e)
-            if ok:
-                print(f"[server] 재접속 ack 수신 from {e['addr']}")
-                e["logout_at"] = None
 
 
 def _try_use_potion(client: dict) -> bool:
@@ -537,10 +537,6 @@ def exchange_loop():
         # server에 대한 정보는 ping, pong으로 갱신되지 않음으로 수동 갱신 후 복사
         clients_snapshot = _update_self_and_snapshot(mp_1, current_hp, max_hp)
 
-        # 서버 로컬이 heal_and_logout 상태인지 확인
-        local_entry = next((e for e in clients_snapshot if "conn" not in e), None)
-        local_logged_out = local_entry is not None and local_entry.get("logout_at") is not None
-
         # ── 서버 HP가 100%가 아니면 stage를 처음으로 되돌린다 ──────────────
         if  current_hp != max_hp:
             print(f"[server] 서버 HP {current_hp}/{max_hp} (100% 아님) → stage 초기화")
@@ -554,9 +550,8 @@ def exchange_loop():
             brightness_changed = False
 
         # ── HP가 0인 상태가 60초 지속되면 자체 재접속 클릭 ────────────────
-        # (단, heal_and_logout 재접속 대기 중에는 죽음 판정 클릭을 하지 않는다)
-        if not local_logged_out:
-            checkRestartStatus(current_hp)
+        # 서버 로컬은 relogin하지 않고 이 죽음 판정 클릭으로만 복귀한다.
+        checkRestartStatus(current_hp)
         
         # heal_and_logout 후 1분 지난 클라이언트(로컬/원격) 재접속
         _check_relogin(clients_snapshot)

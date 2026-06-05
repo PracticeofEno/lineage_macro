@@ -794,6 +794,26 @@ def get_brightness(image: Image.Image) -> float:
     return float(arr.mean())
 
 
+# ── 우상단 Restart(죽음/접속끊김) 석판 패널 감지 ──────────────────────────────
+# 사망 또는 인터넷 끊김 시 우상단에 어둡고 거의 무채색(R≈G≈B)인 석판 메뉴가 뜬다.
+# 살아서 게임 중이면 이 영역엔 게임 월드(밝고 채도 높음)가 보이므로
+# "어둡다 + 무채색" 조합으로 패널 표시 여부를 판별한다. 좌표는 screenshot() 기준.
+_RESTART_PANEL_BOX = (920, 90, 330, 250)  # x, y, w, h
+_RESTART_MAX_BRIGHTNESS = 90              # 이보다 어두워야 패널
+_RESTART_MAX_CHANNEL_SPREAD = 25         # 채널 평균 최대-최소(작을수록 무채색)
+
+
+def detect_restart_menu(img: Image.Image = None) -> bool:
+    """우상단에 Restart(죽음/접속끊김) 석판 메뉴가 떠 있으면 True."""
+    if img is None:
+        img = screenshot(hwnd=lineage1_hwnd)
+    x, y, w, h = _RESTART_PANEL_BOX
+    arr = np.array(crop(img, x, y, w, h).convert('RGB'), dtype=np.float32)
+    brightness = float(arr.mean())
+    ch_spread = float(arr.reshape(-1, 3).mean(0).ptp())  # 채널 평균 최대-최소
+    return brightness < _RESTART_MAX_BRIGHTNESS and ch_spread < _RESTART_MAX_CHANNEL_SPREAD
+
+
 # ── 하단 피통바 OCR (HP=빨간 바, MP=파란 바) ──────────────────────────────────
 # 상태창(우상단)이 가방 등으로 가려져도 항상 보이는 하단 바에서 HP/MP를 읽는다.
 # 각 숫자는 폭 10px 고정 셀에 그려진다. 정렬 때문에 한쪽 끝 셀이 자릿수와 무관하게

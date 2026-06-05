@@ -34,6 +34,10 @@ _conn_thread = None
 _recv_buffers: dict[socket.socket, bytes] = {}
 
 
+class RestartDetected(Exception):
+    """ping 처리 중 우상단 Restart 메뉴가 감지됨 → 서버 연결을 종료한다."""
+
+
 def _send_json(conn: socket.socket, obj: dict) -> bool:
     try:
         conn.sendall((json.dumps(obj) + '\n').encode())
@@ -67,6 +71,9 @@ def _handle_command(msg: dict) -> dict | None:
         current_hp, max_hp = macro.read_hp(img)
         mp = macro.read_mp(img)
         print(f"[client] ping 수신 → HP: {current_hp}/{max_hp}, MP: {mp}")
+        if current_hp != 0 and macro.detect_restart_menu(img):
+            print("[client] HP≠0 + Restart 메뉴 감지(접속 끊김) → 서버 연결 종료")
+            raise RestartDetected
         return {"status": "pong", "mp": mp, "hp": current_hp, "max_hp": max_hp, "req_id": req_id}
 
     if cmd == "heal":
@@ -129,7 +136,10 @@ def _run(conn: socket.socket):
             print("[client] 서버 연결 끊김")
             break
 
-        resp = _handle_command(msg)
+        try:
+            resp = _handle_command(msg)
+        except RestartDetected:
+            break
         if resp is not None:
             if not _send_json(conn, resp):
                 print("[client] 응답 전송 실패")

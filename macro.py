@@ -794,24 +794,25 @@ def get_brightness(image: Image.Image) -> float:
     return float(arr.mean())
 
 
-# ── 우상단 Restart(죽음/접속끊김) 석판 패널 감지 ──────────────────────────────
-# 사망 또는 인터넷 끊김 시 우상단에 어둡고 거의 무채색(R≈G≈B)인 석판 메뉴가 뜬다.
-# 살아서 게임 중이면 이 영역엔 게임 월드(밝고 채도 높음)가 보이므로
-# "어둡다 + 무채색" 조합으로 패널 표시 여부를 판별한다. 좌표는 screenshot() 기준.
-_RESTART_PANEL_BOX = (920, 90, 330, 250)  # x, y, w, h
-_RESTART_MAX_BRIGHTNESS = 90              # 이보다 어두워야 패널
-_RESTART_MAX_CHANNEL_SPREAD = 25         # 채널 평균 최대-최소(작을수록 무채색)
+# ── 우상단 Restart(죽음/접속끊김) 메뉴 감지 ───────────────────────────────────
+# 사망 또는 인터넷 끊김 시 우상단 석판 메뉴에 "Restart" 글자(밝은 흰색)가 뜬다.
+# Restart 글자 영역만 잘라 흰색 픽셀 수를 세고, 학습된 값과 정확히 일치하면 메뉴로
+# 판정한다. 좌표는 screenshot() 기준. (Quit/Cancel 줄은 박스 밖이라 섞이지 않는다.)
+_RESTART_TEXT_BOX = (1060, 118, 115, 32)  # x, y, w, h  "Restart" 한 줄만
+_RESTART_WHITE_THRESHOLD = 200            # 이 값 이상이면 흰색 픽셀로 카운트
+_RESTART_WHITE_COUNT = 488                # 메뉴 표시 시 흰색 픽셀 수(기준값)
+_RESTART_WHITE_TOLERANCE = 50             # 기준값과의 허용 오차(±)
 
 
 def detect_restart_menu(img: Image.Image = None) -> bool:
-    """우상단에 Restart(죽음/접속끊김) 석판 메뉴가 떠 있으면 True."""
+    """우상단 "Restart" 글자의 흰색 픽셀 수가 학습값 ±허용범위 안이면 True."""
     if img is None:
         img = screenshot(hwnd=lineage1_hwnd)
-    x, y, w, h = _RESTART_PANEL_BOX
-    arr = np.array(crop(img, x, y, w, h).convert('RGB'), dtype=np.float32)
-    brightness = float(arr.mean())
-    ch_spread = float(np.ptp(arr.reshape(-1, 3).mean(0)))  # 채널 평균 최대-최소
-    return brightness < _RESTART_MAX_BRIGHTNESS and ch_spread < _RESTART_MAX_CHANNEL_SPREAD
+    x, y, w, h = _RESTART_TEXT_BOX
+    arr = np.array(crop(img, x, y, w, h).convert('RGB'), dtype=np.int32)
+    thr = _RESTART_WHITE_THRESHOLD
+    white = (arr[:, :, 0] >= thr) & (arr[:, :, 1] >= thr) & (arr[:, :, 2] >= thr)
+    return abs(int(white.sum()) - _RESTART_WHITE_COUNT) <= _RESTART_WHITE_TOLERANCE
 
 
 # ── 하단 피통바 OCR (HP=빨간 바, MP=파란 바) ──────────────────────────────────

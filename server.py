@@ -80,6 +80,7 @@ HP_RECOVERY_F10_DELAY_SECONDS = 10.0
 HP_RECOVERY_READ_FAIL_LOG_INTERVAL_SECONDS = 5.0
 RESTART_WATCHER_RESUME_FULL_HP_SECONDS = 5.0
 SERVER_FULL_MP_F5_HOLD_SECONDS = 0.5
+SERVER_FULL_MP_F5_COOLDOWN_SECONDS = 19 * 60
 SERVER_FULL_MP_READ_FAIL_LOG_INTERVAL_SECONDS = 5.0
 
 # 자동 방향전환 후보로 쓰는 8방향 이름입니다. macro_data.json의 방향별 좌표 키와 맞아야 합니다.
@@ -112,6 +113,7 @@ _restart_only_monitor_active = False
 _restart_only_monitor_thread: threading.Thread | None = None
 _last_hp_recovery_read_fail_log_time = 0.0
 _last_server_full_mp_read_fail_log_time = 0.0
+_last_server_full_mp_f5_time = 0.0
 
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
@@ -493,7 +495,8 @@ def _press_server_recovery_key(
 def _press_server_full_mp_f5(current: int, maximum: int) -> bool:
     print(
         f"[server] 서버 풀MP F5 실행 - "
-        f"MP={current}/{maximum}, hold={SERVER_FULL_MP_F5_HOLD_SECONDS:.1f}s"
+        f"MP={current}/{maximum}, hold={SERVER_FULL_MP_F5_HOLD_SECONDS:.1f}s, "
+        f"cooldown={SERVER_FULL_MP_F5_COOLDOWN_SECONDS / 60:.1f}m"
     )
     return _press_server_recovery_key(
         win32con.VK_F5,
@@ -507,7 +510,11 @@ def _press_server_recovery_f6() -> None:
 
 
 def _press_server_f5_if_mp_full() -> bool:
-    global _last_server_full_mp_read_fail_log_time
+    global _last_server_full_mp_read_fail_log_time, _last_server_full_mp_f5_time
+
+    now = time.time()
+    if now - _last_server_full_mp_f5_time < SERVER_FULL_MP_F5_COOLDOWN_SECONDS:
+        return False
 
     try:
         config = _load_hp_recovery_config()
@@ -535,7 +542,11 @@ def _press_server_f5_if_mp_full() -> bool:
     if maximum <= 0 or current < maximum:
         return False
 
-    return _press_server_full_mp_f5(current, maximum)
+    if not _press_server_full_mp_f5(current, maximum):
+        return False
+
+    _last_server_full_mp_f5_time = time.time()
+    return True
 
 
 def _recover_server_hp_if_needed(*, allow_when_macro_stopped: bool = False) -> bool:

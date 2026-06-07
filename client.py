@@ -19,7 +19,7 @@ import win32api
 
 import macro
 
-SERVER_HOST = '112.185.118.218'  # ← 서버 IP로 변경
+SERVER_HOST = 'papawolf16'  # ← 서버 IP로 변경
 SERVER_PORT = 9999
 RECONNECT_DELAY = 5  # 재연결 대기 시간(초)
 

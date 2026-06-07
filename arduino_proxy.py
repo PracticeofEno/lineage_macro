@@ -1,49 +1,62 @@
 """
 arduino_proxy.py - Arduino Serial Proxy
-  - COM5 를 단독 점유
-  - 127.0.0.1:9998 에서 명령을 수신해 Arduino 에 전달하고 응답을 반환
-  - server.py / client.py 보다 먼저 실행해야 한다
+  - Scans COM0 through COM20 and uses the first serial port that opens.
+  - Listens on 127.0.0.1:9998, forwards commands to Arduino, and returns replies.
+  - Run this before server.py / client.py / hp_macro scripts.
 """
 
 import socket
-import threading
-import serial
 import sys
+import threading
 
-SERIAL_PORT = 'COM5'
-BAUD_RATE   = 115200
-PROXY_HOST  = '127.0.0.1'
-PROXY_PORT  = 9998
+import serial
 
-# ── 시리얼 초기화 ─────────────────────────────────────────────────────────────
-try:
-    _ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-    print(f"[proxy] Arduino 연결됨: {SERIAL_PORT} @ {BAUD_RATE}")
-except serial.SerialException as e:
-    print(f"[proxy] 시리얼 포트 열기 실패: {e}")
+SERIAL_PORTS = [f"COM{i}" for i in range(0, 21)]
+BAUD_RATE = 115200
+PROXY_HOST = "127.0.0.1"
+PROXY_PORT = 9998
+
+
+def _open_serial() -> serial.Serial:
+    """Scan COM0..COM20 and return the first serial port that opens."""
+    errors: list[str] = []
+    for port in SERIAL_PORTS:
+        try:
+            ser = serial.Serial(port, BAUD_RATE, timeout=1)
+            print(f"[proxy] Arduino connected: {port} @ {BAUD_RATE}")
+            return ser
+        except serial.SerialException as e:
+            errors.append(f"{port}: {e}")
+
+    print("[proxy] Arduino serial port not found in COM0..COM20.")
+    print("[proxy] Failed ports:")
+    for error in errors:
+        print(f"  - {error}")
     sys.exit(1)
 
+
+_ser = _open_serial()
 _ser_lock = threading.Lock()
 
 
 def _handle_client(conn: socket.socket, addr: tuple):
-    print(f"[proxy] 클라이언트 연결: {addr}")
-    buf = b''
+    print(f"[proxy] client connected: {addr}")
+    buf = b""
     try:
         while True:
             chunk = conn.recv(256)
             if not chunk:
                 break
             buf += chunk
-            while b'\n' in buf:
-                line, buf = buf.split(b'\n', 1)
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
                 cmd = line.decode().strip()
                 if not cmd:
                     continue
                 with _ser_lock:
-                    _ser.write((cmd + '\n').encode())
+                    _ser.write((cmd + "\n").encode())
                     resp = _ser.readline().decode().strip()
-                conn.sendall((resp + '\n').encode())
+                conn.sendall((resp + "\n").encode())
     except OSError:
         pass
     finally:
@@ -51,16 +64,15 @@ def _handle_client(conn: socket.socket, addr: tuple):
             conn.close()
         except OSError:
             pass
-        print(f"[proxy] 클라이언트 종료: {addr}")
+        print(f"[proxy] client closed: {addr}")
 
 
-# ── TCP 서버 ──────────────────────────────────────────────────────────────────
 srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 srv.bind((PROXY_HOST, PROXY_PORT))
 srv.listen(10)
-print(f"[proxy] 대기 중: {PROXY_HOST}:{PROXY_PORT}")
-print("종료하려면 Ctrl+C")
+print(f"[proxy] listening: {PROXY_HOST}:{PROXY_PORT}")
+print("Press Ctrl+C to stop")
 
 
 def _accept_loop():
@@ -78,7 +90,7 @@ try:
     while True:
         threading.Event().wait(1)
 except KeyboardInterrupt:
-    print("[proxy] 종료")
+    print("[proxy] stopped")
 finally:
     srv.close()
     _ser.close()

@@ -34,6 +34,13 @@ SAME_UNIT_DELAY = 0.5
 # MP 포션 사용 후 다시 사용할 수 있을 때까지 기다리는 시간(초)입니다.
 POTION_COOLDOWN = 600
 
+# MP 포션 명령 후 실제로 먹었는지 판단할 때 쓰는 MP 증가량입니다.
+# 자연 회복은 보통 +3, 포션 회복은 보통 +10으로 관찰됩니다.
+MP_RECOVERY_TICK_SECONDS = 16.0
+POTION_UNEATEN_GAIN_MAX = 5
+POTION_EATEN_GAIN_MIN = 8
+POTION_VERIFY_TIMEOUT_SECONDS = MP_RECOVERY_TICK_SECONDS + 6.0
+
 # 개별 창의 헤이스트 가능 횟수가 이 값 이하이면 MP 포션 사용 후보로 봅니다.
 # macro_data.json의 direction_threshold와 다릅니다. 이 값은 "포션 사용 기준"입니다.
 LOW_MP_AVAILABLE_THRESHOLD = 1
@@ -285,16 +292,92 @@ def _recv_json(conn: socket.socket) -> dict | None:
         return None
 
 
-def _try_use_potion(client: dict) -> bool:
-    if client["available"] > LOW_MP_AVAILABLE_THRESHOLD:
+def _potion_target_label(client: dict) -> str:
+    if "conn" not in client:
+        return "server"
+    return f"client_idx={client.get('idx')}"
+
+
+def _clear_expired_potion_check(client: dict, now: float) -> bool:
+    check = client.get("potion_check")
+    if not check:
         return False
+
+    sent_at = float(check.get("sent_at", now))
+    if now - sent_at < POTION_VERIFY_TIMEOUT_SECONDS:
+        return True
+
+    client["potion_check"] = None
+    client["potion_retry_required"] = True
+    print(f"[server] 포션 확인 시간초과 - target={_potion_target_label(client)}, retry")
+    return False
+
+
+def _start_potion_check(client: dict, base_mp: int, sent_at: float) -> None:
+    client["potion_check"] = {
+        "sent_at": sent_at,
+        "base_mp": base_mp,
+        "last_mp": base_mp,
+    }
+    client["potion_retry_required"] = False
+    print(
+        f"[server] 포션 확인 시작 - target={_potion_target_label(client)}, "
+        f"base_mp={base_mp}"
+    )
+
+
+def _update_potion_check(client: dict, mp: int) -> None:
+    check = client.get("potion_check")
+    if not check:
+        return
+
     now = time.time()
+    last_mp = int(check.get("last_mp", mp))
+    check["last_mp"] = mp
+    delta = mp - last_mp
+
+    if delta >= POTION_EATEN_GAIN_MIN:
+        client["potion_check"] = None
+        client["potion_retry_required"] = False
+        client["potion_last_used"] = float(check.get("sent_at", now))
+        print(
+            f"[server] 포션 사용 확인 - target={_potion_target_label(client)}, "
+            f"mp_delta={delta}, mp={mp}, cooldown={POTION_COOLDOWN}s"
+        )
+        return
+
+    if 0 < delta <= POTION_UNEATEN_GAIN_MAX:
+        client["potion_check"] = None
+        client["potion_retry_required"] = True
+        print(
+            f"[server] 포션 미사용 감지 - target={_potion_target_label(client)}, "
+            f"mp_delta={delta}, mp={mp}, retry"
+        )
+        return
+
+    if now - float(check.get("sent_at", now)) >= POTION_VERIFY_TIMEOUT_SECONDS:
+        client["potion_check"] = None
+        client["potion_retry_required"] = True
+        print(
+            f"[server] 포션 확인 시간초과 - target={_potion_target_label(client)}, "
+            f"mp_delta={delta}, mp={mp}, retry"
+        )
+
+
+def _try_use_potion(client: dict) -> bool:
+    now = time.time()
+    if _clear_expired_potion_check(client, now):
+        return False
+
+    force_retry = bool(client.get("potion_retry_required"))
+    if client["available"] > LOW_MP_AVAILABLE_THRESHOLD and not force_retry:
+        return False
     if now - client["potion_last_used"] < POTION_COOLDOWN:
         return False
 
     if "conn" not in client:  # 서버 로컬
         macro.use_potion()
-        client["potion_last_used"] = now
+        _start_potion_check(client, int(client.get("mp", 0)), now)
         return True
 
     conn = client["conn"]
@@ -309,8 +392,8 @@ def _try_use_potion(client: dict) -> bool:
                 for line in ack.get("logs", []):
                     print(f"[client idx({client.get('idx')})] {line}")
             if ack and ack.get("status") == "ok":
-                client["potion_last_used"] = now
                 print(f"[server] 포션 응답 수신 - client_idx={client.get('idx')}, status=ok, addr={addr}")
+                _start_potion_check(client, int(client.get("mp", 0)), now)
                 return True
     return False
 
@@ -703,7 +786,17 @@ def _handle_client(conn: socket.socket, addr: tuple):
         conn.close()
         return
 
-    client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "idx": idx, "available": 0, "potion_last_used": 0}
+    client = {
+        "conn": conn,
+        "addr": addr,
+        "lock": threading.Lock(),
+        "mp": 0,
+        "idx": idx,
+        "available": 0,
+        "potion_last_used": 0,
+        "potion_check": None,
+        "potion_retry_required": False,
+    }
     with _clients_lock:
         _clients.append(client)
     try:
@@ -726,6 +819,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
                     if mp is not None:
                         client["mp"] = int(mp)
                         client["available"] = int(client["mp"] // 20)
+                        _update_potion_check(client, client["mp"])
                     # print(f"[server] client {addr} MP: {client['mp']}  available: {client['available']}")
             if restart_detected:
                 _request_restart_shutdown(
@@ -1231,6 +1325,7 @@ def exchange_loop():
                     if "conn" not in e:
                         e["mp"] = macro.mp_1
                         e["available"] = int(macro.mp_1 // 20)
+                        _update_potion_check(e, e["mp"])
                         break
                 clients_snapshot = list(_clients)
 
@@ -1698,7 +1793,14 @@ if __name__ == "__main__":
 
     # 서버 자신을 idx=0 으로 _clients에 등록 (conn/addr/lock 없음)
     with _clients_lock:
-        _clients.append({"idx": 0, "mp": 0, "available": 0, "potion_last_used": 0})
+        _clients.append({
+            "idx": 0,
+            "mp": 0,
+            "available": 0,
+            "potion_last_used": 0,
+            "potion_check": None,
+            "potion_retry_required": False,
+        })
 
     print("\n명령어: q=종료, 1=exchange 시작, 2=exchange 중지")
     exchange_thread = None

@@ -6,7 +6,6 @@ server.py - Exchange 서버
 """
 
 import os
-from pathlib import Path
 import socket
 import threading
 import json
@@ -17,7 +16,6 @@ import win32con
 import win32gui
 
 import macro
-from hp_macro import hp_macro as hp_reader
 
 # 서버가 client.py 연결을 받을 IP입니다. 0.0.0.0은 현재 PC의 모든 네트워크에서 받겠다는 뜻입니다.
 HOST = '0.0.0.0'
@@ -78,18 +76,6 @@ EXCHANGE_SLOT_BRIGHTNESS_THRESHOLD = 110.0
 # 상대방 거래창에 아데나 외 이미지가 올라왔을 때 취소 후 입력할 안내 문구입니다.
 INVALID_TRADE_ITEM_MESSAGE = "아데나만 올려주세요."
 
-# 서버 HP가 풀피가 아니면 다른 매크로 입력보다 먼저 회복을 끝냅니다.
-HP_RECOVERY_CONFIG_PATH = Path(__file__).resolve().parent / "hp_macro" / "config.json"
-HP_RECOVERY_KEY_HOLD_SECONDS = 0.15
-HP_RECOVERY_F6_KEY_HOLD_SECONDS = 0.5
-HP_RECOVERY_F6_INTERVAL_SECONDS = 0.0
-HP_RECOVERY_F10_DELAY_SECONDS = 10.0
-HP_RECOVERY_READ_FAIL_LOG_INTERVAL_SECONDS = 5.0
-RESTART_WATCHER_RESUME_FULL_HP_SECONDS = 5.0
-SERVER_FULL_MP_F5_HOLD_SECONDS = 0.5
-SERVER_FULL_MP_F5_COOLDOWN_SECONDS = 19 * 60
-SERVER_FULL_MP_READ_FAIL_LOG_INTERVAL_SECONDS = 5.0
-
 # 자동 방향전환 후보로 쓰는 8방향 이름입니다. macro_data.json의 방향별 좌표 키와 맞아야 합니다.
 TURN_DIRECTIONS = (
     "north",
@@ -110,17 +96,7 @@ _clients: list[dict] = []
 _clients_lock = threading.Lock()
 _macro_data_write_lock = threading.Lock()
 _restart_shutdown_lock = threading.Lock()
-_restart_watcher_gate_lock = threading.Lock()
-_restart_only_monitor_lock = threading.Lock()
 _restart_shutdown_started = False
-_restart_watcher_hp_recovery_active = False
-_restart_watcher_resume_at = 0.0
-_restart_watcher_resume_reported = True
-_restart_only_monitor_active = False
-_restart_only_monitor_thread: threading.Thread | None = None
-_last_hp_recovery_read_fail_log_time = 0.0
-_last_server_full_mp_read_fail_log_time = 0.0
-_last_server_full_mp_f5_time = 0.0
 
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
@@ -134,11 +110,10 @@ def _is_f12_pressed() -> bool:
 
 
 def _request_f12_stop() -> bool:
-    global running, _f12_stop_reported, _restart_only_monitor_active
+    global running, _f12_stop_reported
     if not _is_f12_pressed():
         return False
     running = False
-    _restart_only_monitor_active = False
     if not _f12_stop_reported:
         print("[server] F12 emergency stop")
         _f12_stop_reported = True
@@ -155,50 +130,6 @@ def _sleep_interruptible(seconds: float) -> bool:
             return True
         time.sleep(min(0.05, remaining))
     return False
-
-
-def _restart_only_monitor_should_run() -> bool:
-    with _restart_only_monitor_lock:
-        return _server_running and _restart_only_monitor_active
-
-
-def _stop_restart_only_monitor() -> None:
-    global _restart_only_monitor_active
-
-    with _restart_only_monitor_lock:
-        _restart_only_monitor_active = False
-
-
-def _restart_only_monitor_loop() -> None:
-    global _restart_only_monitor_active
-
-    print("[server] Restart-only monitor 시작 - hp/restart watcher only")
-    try:
-        while _restart_only_monitor_should_run():
-            if _request_f12_stop():
-                break
-            _recover_server_hp_if_needed(allow_when_macro_stopped=True)
-            if _sleep_interruptible(0.2):
-                break
-    finally:
-        with _restart_only_monitor_lock:
-            _restart_only_monitor_active = False
-        print("[server] Restart-only monitor 종료")
-
-
-def _start_restart_only_monitor() -> None:
-    global _restart_only_monitor_active, _restart_only_monitor_thread
-
-    with _restart_only_monitor_lock:
-        _restart_only_monitor_active = True
-        if _restart_only_monitor_thread is not None and _restart_only_monitor_thread.is_alive():
-            return
-        _restart_only_monitor_thread = threading.Thread(
-            target=_restart_only_monitor_loop,
-            name="restart-only-monitor",
-            daemon=True,
-        )
-        _restart_only_monitor_thread.start()
 
 
 def _normalize_nickname_list(raw_nicknames) -> list[str]:
@@ -482,293 +413,11 @@ def _request_restart_shutdown(
     for client in clients_snapshot:
         _send_restart(client)
 
-    _start_restart_only_monitor()
-    print("[server] Restart 처리 완료 - exchange macro stopped, hp/restart watcher only")
+    print("[server] Restart 처리 완료 - exchange macro stopped")
 
 
 def _handle_restart_watcher_click() -> None:
     _request_restart_shutdown("watcher", click_server=False)
-
-
-def _pause_restart_watcher_for_hp_recovery() -> None:
-    global _restart_watcher_hp_recovery_active, _restart_watcher_resume_at, _restart_watcher_resume_reported
-
-    with _restart_watcher_gate_lock:
-        if _restart_watcher_hp_recovery_active:
-            return
-        _restart_watcher_hp_recovery_active = True
-        _restart_watcher_resume_at = float("inf")
-        _restart_watcher_resume_reported = False
-
-    print("[server] Restart watcher 일시정지 - reason=hp_recovery")
-
-
-def _schedule_restart_watcher_after_hp_recovery(full_since: float) -> None:
-    global _restart_watcher_hp_recovery_active, _restart_watcher_resume_at, _restart_watcher_resume_reported
-
-    resume_at = full_since + RESTART_WATCHER_RESUME_FULL_HP_SECONDS
-    with _restart_watcher_gate_lock:
-        _restart_watcher_hp_recovery_active = False
-        _restart_watcher_resume_at = resume_at
-        _restart_watcher_resume_reported = False
-
-    remaining = max(0.0, resume_at - time.time())
-    print(
-        f"[server] Restart watcher 재개 예약 - "
-        f"full_hp_hold={RESTART_WATCHER_RESUME_FULL_HP_SECONDS:.1f}s, "
-        f"remaining={remaining:.1f}s"
-    )
-
-
-def _restart_watcher_can_click() -> bool:
-    global _restart_watcher_resume_reported
-
-    now = time.time()
-    should_report_resume = False
-    with _restart_watcher_gate_lock:
-        if _restart_watcher_hp_recovery_active:
-            return False
-        if now < _restart_watcher_resume_at:
-            return False
-        if not _restart_watcher_resume_reported and _restart_watcher_resume_at > 0:
-            _restart_watcher_resume_reported = True
-            should_report_resume = True
-
-    if should_report_resume:
-        print("[server] Restart watcher 재개 - full HP hold satisfied")
-    return True
-
-
-def _load_hp_recovery_config() -> dict:
-    return hp_reader.load_config(HP_RECOVERY_CONFIG_PATH)
-
-
-def _read_server_hp_state(config: dict) -> dict[str, float | int | str] | None:
-    hp_read = config.get("hp_read", {})
-    capture_mode = str(hp_read.get("capture_mode", "window")).lower()
-    img = macro.screenshot(hwnd=macro.lineage1_hwnd) if capture_mode == "window" else None
-    return hp_reader.read_hp_state(config, img=img)
-
-
-def _read_server_mp_state(config: dict) -> dict[str, float | int | str] | None:
-    mp_read = config.get("mp_read", {})
-    capture_mode = str(mp_read.get("capture_mode", "window")).lower()
-    img = macro.screenshot(hwnd=macro.lineage1_hwnd) if capture_mode == "window" else None
-    return hp_reader.read_mp_state(config, img=img)
-
-
-def _press_server_recovery_key(
-    vk: int,
-    hold_seconds: float = HP_RECOVERY_KEY_HOLD_SECONDS,
-    *,
-    click_titlebar: bool = False,
-) -> bool:
-    focused = macro.activate_window_for_input(macro.lineage1_hwnd, click_titlebar=click_titlebar)
-    if not focused:
-        print(f"[server] 서버창 포커스 실패 - key skipped: vk={vk}")
-        return False
-    macro.arduino_key_down(vk)
-    try:
-        time.sleep(hold_seconds)
-    finally:
-        macro.arduino_key_up(vk)
-    return True
-
-
-def _press_server_full_mp_f5(current: int, maximum: int) -> bool:
-    print(
-        f"[server] 서버 풀MP F5 실행 - "
-        f"MP={current}/{maximum}, hold={SERVER_FULL_MP_F5_HOLD_SECONDS:.1f}s, "
-        f"cooldown={SERVER_FULL_MP_F5_COOLDOWN_SECONDS / 60:.1f}m"
-    )
-    return _press_server_recovery_key(
-        win32con.VK_F5,
-        SERVER_FULL_MP_F5_HOLD_SECONDS,
-        click_titlebar=True,
-    )
-
-
-def _press_server_recovery_f6() -> None:
-    _press_server_recovery_key(win32con.VK_F6, HP_RECOVERY_F6_KEY_HOLD_SECONDS)
-
-
-def _press_server_f5_if_mp_full() -> bool:
-    global _last_server_full_mp_read_fail_log_time, _last_server_full_mp_f5_time
-
-    now = time.time()
-    if now - _last_server_full_mp_f5_time < SERVER_FULL_MP_F5_COOLDOWN_SECONDS:
-        return False
-
-    try:
-        config = _load_hp_recovery_config()
-        macro.force_set_foreground_window(macro.lineage1_hwnd)
-        mp_state = _read_server_mp_state(config)
-    except macro.RestartButtonClicked:
-        _request_restart_shutdown("server_full_mp_f5", click_server=False)
-        return True
-    except (OSError, RuntimeError, KeyError, ValueError) as exc:
-        now = time.time()
-        if now - _last_server_full_mp_read_fail_log_time >= SERVER_FULL_MP_READ_FAIL_LOG_INTERVAL_SECONDS:
-            print(f"[server] MP 읽기 실패 - full MP F5 skipped, error={exc}")
-            _last_server_full_mp_read_fail_log_time = now
-        return False
-
-    if mp_state is None:
-        now = time.time()
-        if now - _last_server_full_mp_read_fail_log_time >= SERVER_FULL_MP_READ_FAIL_LOG_INTERVAL_SECONDS:
-            print("[server] MP 읽기 실패 - full MP F5 skipped, state=None")
-            _last_server_full_mp_read_fail_log_time = now
-        return False
-
-    current = int(mp_state["current"])
-    maximum = int(mp_state["maximum"])
-    if maximum <= 0 or current < maximum:
-        return False
-
-    if not _press_server_full_mp_f5(current, maximum):
-        return False
-
-    _last_server_full_mp_f5_time = time.time()
-    return True
-
-
-def _recover_server_hp_if_needed(*, allow_when_macro_stopped: bool = False) -> bool:
-    """서버 HP가 풀피가 아니면 F11 후 F6을 반복하고, 회복이 끝날 때까지 다른 입력을 막는다."""
-    global _last_hp_recovery_read_fail_log_time
-
-    def should_continue() -> bool:
-        if allow_when_macro_stopped:
-            return _restart_only_monitor_should_run()
-        return running
-
-    try:
-        config = _load_hp_recovery_config()
-        macro.force_set_foreground_window(macro.lineage1_hwnd)
-        hp_state = _read_server_hp_state(config)
-    except macro.RestartButtonClicked:
-        _request_restart_shutdown("server_hp_recovery", click_server=False)
-        return True
-    except (OSError, RuntimeError, KeyError, ValueError) as exc:
-        now = time.time()
-        if now - _last_hp_recovery_read_fail_log_time >= HP_RECOVERY_READ_FAIL_LOG_INTERVAL_SECONDS:
-            print(f"[server] HP 읽기 실패 - recovery skipped, error={exc}")
-            _last_hp_recovery_read_fail_log_time = now
-        return False
-
-    if hp_state is None:
-        now = time.time()
-        if now - _last_hp_recovery_read_fail_log_time >= HP_RECOVERY_READ_FAIL_LOG_INTERVAL_SECONDS:
-            print("[server] HP 읽기 실패 - recovery skipped, state=None")
-            _last_hp_recovery_read_fail_log_time = now
-        return False
-
-    current = int(hp_state["current"])
-    maximum = int(hp_state["maximum"])
-    if maximum <= 0 or current >= maximum:
-        return False
-
-    print(f"[server] HP 회복 시작 - HP={current}/{maximum}, action=F11_then_F6")
-    _pause_restart_watcher_for_hp_recovery()
-    _press_server_recovery_key(win32con.VK_F11)
-    if _sleep_interruptible(0.2):
-        return True
-
-    _press_server_recovery_f6()
-    if _sleep_interruptible(HP_RECOVERY_F6_INTERVAL_SECONDS):
-        return True
-
-    last_status_time = 0.0
-    while should_continue():
-        if _request_f12_stop():
-            return True
-
-        try:
-            macro.force_set_foreground_window(macro.lineage1_hwnd)
-            hp_state = _read_server_hp_state(config)
-        except macro.RestartButtonClicked:
-            _request_restart_shutdown("server_hp_recovery", click_server=False)
-            return True
-        except (OSError, RuntimeError, KeyError, ValueError) as exc:
-            now = time.time()
-            if now - last_status_time >= 1.0:
-                print(f"[server] HP 회복 중 읽기 실패 - action=F6_continue, error={exc}")
-                last_status_time = now
-            _press_server_recovery_f6()
-            if _sleep_interruptible(HP_RECOVERY_F6_INTERVAL_SECONDS):
-                return True
-            continue
-
-        if hp_state is None:
-            now = time.time()
-            if now - last_status_time >= 1.0:
-                print("[server] HP 회복 중 읽기 실패 - action=F6_continue, state=None")
-                last_status_time = now
-            _press_server_recovery_f6()
-            if _sleep_interruptible(HP_RECOVERY_F6_INTERVAL_SECONDS):
-                return True
-            continue
-
-        current = int(hp_state["current"])
-        maximum = int(hp_state["maximum"])
-        if maximum > 0 and current >= maximum:
-            full_since = time.time()
-            print(
-                f"[server] HP 풀피 확인 - HP={current}/{maximum}, "
-                f"F10 delay={HP_RECOVERY_F10_DELAY_SECONDS:.1f}s"
-            )
-            f10_deadline = full_since + HP_RECOVERY_F10_DELAY_SECONDS
-            while should_continue():
-                if _request_f12_stop():
-                    return True
-
-                remaining = f10_deadline - time.time()
-                if remaining <= 0:
-                    _press_server_recovery_key(win32con.VK_F10)
-                    _schedule_restart_watcher_after_hp_recovery(full_since)
-                    print("[server] HP 회복 후 F10 복귀")
-                    return True
-
-                if _sleep_interruptible(min(0.5, remaining)):
-                    return True
-
-                try:
-                    hp_state = _read_server_hp_state(config)
-                except macro.RestartButtonClicked:
-                    _request_restart_shutdown("server_hp_recovery", click_server=False)
-                    return True
-                except (OSError, RuntimeError, KeyError, ValueError) as exc:
-                    now = time.time()
-                    if now - last_status_time >= 1.0:
-                        print(f"[server] F10 대기 중 HP 읽기 실패 - error={exc}")
-                        last_status_time = now
-                    continue
-
-                if hp_state is None:
-                    now = time.time()
-                    if now - last_status_time >= 1.0:
-                        print("[server] F10 대기 중 HP 읽기 실패 - state=None")
-                        last_status_time = now
-                    continue
-
-                current = int(hp_state["current"])
-                maximum = int(hp_state["maximum"])
-                if maximum > 0 and current < maximum:
-                    print(f"[server] F10 대기 중 HP 하락 - HP={current}/{maximum}, action=F6_continue")
-                    break
-
-            if not should_continue():
-                return True
-            continue
-
-        now = time.time()
-        if now - last_status_time >= 1.0:
-            print(f"[server] HP 회복 중 - HP={current}/{maximum}, action=F6")
-            last_status_time = now
-        _press_server_recovery_f6()
-        if _sleep_interruptible(HP_RECOVERY_F6_INTERVAL_SECONDS):
-            return True
-
-    return True
 
 
 def _handle_client(conn: socket.socket, addr: tuple):
@@ -1285,10 +934,6 @@ def exchange_loop():
     while running:
         if _request_f12_stop():
             break
-        if _recover_server_hp_if_needed():
-            if not running:
-                break
-            continue
         # 이전 stage가 READ_ADENA 이상이었을 경우 WAIT_NICKNAME 복귀 시 TAB + 타겟 리셋
         if stage != prev_stage:
             if stage == WAIT_NICKNAME and prev_stage is not None and prev_stage >= READ_ADENA:
@@ -1297,12 +942,7 @@ def exchange_loop():
                     break
             prev_stage = stage
 
-        if stage == WAIT_NICKNAME and _press_server_f5_if_mp_full():
-            if _sleep_interruptible(0.2):
-                break
-            continue
-
-        # ── Stage 1: MP 읽기 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
+        # ── Stage 1: 클라이언트 MP 확인 / 방향 조정 / 광고 / 닉네임 대기 ──────────────
         if stage == WAIT_NICKNAME:
             if not direction_synced:
                 if macro.sync_direction(force=True):
@@ -1312,21 +952,8 @@ def exchange_loop():
                 direction_synced = True
 
             img = macro.screenshot(hwnd=macro.lineage1_hwnd)
-            try:
-                _mp1 = macro.readMp(img)
-            except macro.RestartButtonClicked:
-                _request_restart_shutdown("server", click_server=False)
-                break
-            if _mp1 is not None:
-                macro.mp_1 = _mp1
 
             with _clients_lock:
-                for e in _clients:
-                    if "conn" not in e:
-                        e["mp"] = macro.mp_1
-                        e["available"] = int(macro.mp_1 // 20)
-                        _update_potion_check(e, e["mp"])
-                        break
                 clients_snapshot = list(_clients)
 
             for e in clients_snapshot:
@@ -1336,10 +963,6 @@ def exchange_loop():
                         break
                 if _try_use_potion(e):
                     _last_potion_idx_time[e["idx"]] = time.time()
-                    if e["idx"] == 0 and "conn" in e:
-                        if _sleep_interruptible(0.5):
-                            break
-                        macro.force_set_foreground_window(macro.lineage1_hwnd)
             if not running:
                 break
 
@@ -1698,10 +1321,6 @@ def exchange_loop():
             while remaining > 0 and running:
                 if _request_f12_stop():
                     break
-                if _recover_server_hp_if_needed():
-                    if not running:
-                        break
-                    continue
                 with_avail = [c for c in clients_snapshot if pickup_avail[id(c)] > 0]
                 if not with_avail:
                     break
@@ -1778,10 +1397,7 @@ def exchange_loop():
 # ── 진입점 ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     macro.init_setting("server")
-    macro.start_restart_watcher(
-        on_click=_handle_restart_watcher_click,
-        should_click=_restart_watcher_can_click,
-    )
+    macro.start_restart_watcher(on_click=_handle_restart_watcher_click)
 
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1791,24 +1407,12 @@ if __name__ == "__main__":
 
     threading.Thread(target=_accept_loop, args=(server_sock,), daemon=True).start()
 
-    # 서버 자신을 idx=0 으로 _clients에 등록 (conn/addr/lock 없음)
-    with _clients_lock:
-        _clients.append({
-            "idx": 0,
-            "mp": 0,
-            "available": 0,
-            "potion_last_used": 0,
-            "potion_check": None,
-            "potion_retry_required": False,
-        })
-
     print("\n명령어: q=종료, 1=exchange 시작, 2=exchange 중지")
     exchange_thread = None
     while True:
         cmd = input("> ").strip()
         if cmd == "q":
             running = False
-            _stop_restart_only_monitor()
             _server_running = False
             server_sock.close()
             break
@@ -1816,7 +1420,6 @@ if __name__ == "__main__":
             if exchange_thread and exchange_thread.is_alive():
                 print("[server] exchange 이미 실행 중")
             else:
-                _stop_restart_only_monitor()
                 macro.force_set_foreground_window(macro.lineage1_hwnd)
                 running = True
                 _f12_stop_reported = False
@@ -1825,7 +1428,6 @@ if __name__ == "__main__":
                 exchange_thread.start()
         if cmd == "2":
             running = False
-            _stop_restart_only_monitor()
         if cmd == "3":
             with _clients_lock:
                 target = next((c for c in _clients if c.get("idx") == 1 and "conn" in c), None)

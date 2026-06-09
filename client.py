@@ -35,10 +35,9 @@ _restart_watcher_stop_reported = False
 
 
 def _handle_restart_watcher_click() -> None:
-    global running, _restart_watcher_stop_reported
-    running = False
+    global _restart_watcher_stop_reported
     if not _restart_watcher_stop_reported:
-        print(f"[client idx({CLIENT_IDX})] Restart watcher clicked - client macro stopped")
+        print(f"[client idx({CLIENT_IDX})] Restart watcher clicked - connection kept")
         _restart_watcher_stop_reported = True
 
 
@@ -72,9 +71,8 @@ def _handle_command(msg: dict) -> dict | None:
         try:
             mp = macro.readMp()
         except macro.RestartButtonClicked:
-            running = False
             _restart_watcher_stop_reported = True
-            return {"status": "stopped", "mp": None, "logs": ["Restart clicked - client macro stopped"]}
+            return {"status": "restart_detected", "mp": None, "logs": ["Restart clicked - connection kept"]}
         if mp is None:
             logs.append("MP 읽기 실패")
             return {"status": "pong", "mp": mp, "logs": logs}
@@ -108,13 +106,12 @@ def _handle_command(msg: dict) -> dict | None:
     if cmd == "restart":
         logs = ["Restart 명령 수신"]
         clicked = macro.click_restart_if_visible()
-        running = False
         _restart_watcher_stop_reported = True
         if clicked:
-            logs.append("Restart clicked - client macro stopped")
+            logs.append("Restart clicked - connection kept")
         else:
-            logs.append("Restart not visible - client macro stopped")
-        return {"status": "stopped", "clicked": clicked, "logs": logs}
+            logs.append("Restart not visible - connection kept")
+        return {"status": "ok", "clicked": clicked, "logs": logs}
 
     if cmd == "chat":
         message = str(msg.get("message", "")).strip()

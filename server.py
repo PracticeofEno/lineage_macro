@@ -361,10 +361,10 @@ def _send_restart(client: dict) -> bool:
         for line in resp.get("logs", []):
             print(f"[client idx({client.get('idx')})] {line}")
 
-        if resp.get("status") == "stopped":
+        if resp.get("status") in ("ok", "restart_detected", "stopped"):
             print(
                 f"[server] Restart 응답 수신 - client_idx={client.get('idx')}, "
-                f"clicked={resp.get('clicked')}, addr={addr}"
+                f"status={resp.get('status')}, clicked={resp.get('clicked')}, addr={addr}"
             )
             return True
 
@@ -458,7 +458,7 @@ def _handle_client(conn: socket.socket, addr: tuple):
                     break
                 for line in resp.get("logs", []):
                     print(f"[client idx({client.get('idx')})] {line}")
-                if resp.get("status") == "stopped":
+                if resp.get("status") in ("restart_detected", "stopped"):
                     restart_detected = True
                 elif resp.get("status") == "pong":
                     mp = resp.get("mp")
@@ -473,7 +473,6 @@ def _handle_client(conn: socket.socket, addr: tuple):
                     skip_client=client,
                     click_server=True,
                 )
-                break
             if _sleep_interruptible(2):
                 break
     finally:

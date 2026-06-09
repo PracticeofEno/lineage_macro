@@ -78,7 +78,6 @@ def _stamp_idx(idx: int):
     """idx 동작 시각을 현재로 갱신한다."""
     with _idx_action_lock:
         _idx_last_action_time[idx] = time.time()
-_server_hp_zero_since: float | None = None  # 서버 자신 HP 0 지속 시작 시각
 
 
 running = True          # exchange 루프 제어 (cmd 1=시작, 2=중지)
@@ -339,14 +338,12 @@ def _handle_client(conn: socket.socket, addr: tuple):
         conn.close()
         return
 
-    client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "hp": 0, "max_hp": 0, "idx": idx, "available": 0, "potion_last_used": 0, "logout_at": None}
+    client = {"conn": conn, "addr": addr, "lock": threading.Lock(), "mp": 0, "hp": 0, "max_hp": 0, "idx": idx, "available": 0, "potion_last_used": 0, "logout_at": None, "hp_zero_since": None}
     with _clients_lock:
         _clients.append(client)
 
     _send_json(conn, {"cmd": "reset_coord"})
     print(f"[server] 좌표 초기화 전송 → {addr}")
-
-    hp_zero_since: float | None = None
 
     try:
         while True:
@@ -375,27 +372,6 @@ def _handle_client(conn: socket.socket, addr: tuple):
                     client["max_hp"] = resp.get("max_hp", 0)
                     client["available"] = int(client["mp"] // 20)
                     # print(f"[server] client {addr} HP: {client['hp']}  MP: {client['mp']}  available: {client['available']}")
-
-                    if client["hp"] == 0:
-                        if hp_zero_since is None:
-                            hp_zero_since = time.time()
-                        elif time.time() - hp_zero_since >= 60:
-                            if _claim_idx_slot(idx, CLICK_IDX_COOLDOWN):
-                                click_req_id = _next_request_id()
-                                print(f"[server] HP 0 60초 지속 → 클릭 명령 전송: {addr}")
-                                if _send_json(conn, {"cmd": "click", "x": 1080, "y": 174, "req_id": click_req_id}):
-                                    ack = _recv_expected_response(
-                                        conn,
-                                        req_id=click_req_id,
-                                        expected_status="ok",
-                                        timeout=ACK_TIMEOUT,
-                                        client=client,
-                                    )
-                                    if ack:
-                                        print(f"[server] 클릭 ack 수신 from {addr}")
-                                        hp_zero_since = time.time()
-                    else:
-                        hp_zero_since = None
             time.sleep(0.5)
     finally:
         _remove_client(client)
@@ -470,35 +446,72 @@ def _broadcast_move_coord(from_dir: str, to_dir: str):
     print(f"[server] 좌표 브로드캐스트: {from_dir} → {to_dir}  (dx={dx:+}, dy={dy:+})")
 
 
-# ── 서버 자신 재접속 감시 ─────────────────────────────────────────────────────
-def checkRestartStatus(current_hp: int):
-    """서버 자신 HP가 0인 상태가 60초 지속되면 자체 재접속 클릭을 실행한다."""
-    global _server_hp_zero_since
-    if current_hp != 0:
-        _server_hp_zero_since = None
-        return
-    if _server_hp_zero_since is None:
-        _server_hp_zero_since = time.time()
-        return
-    if time.time() - _server_hp_zero_since < 60:
-        return
+# ── 서버/클라이언트 재접속 감시 ───────────────────────────────────────────────
+def _server_self_restart_click():
+    """서버 로컬의 자체 재접속 클릭 시퀀스."""
+    macro.force_set_foreground_window(macro.lineage1_hwnd)
+    win32api.SetCursorPos((1080, 174))
+    time.sleep(1)
+    macro.arduino_mouse_click_left()
+    time.sleep(2)
+    macro.arduino_key_press(win32con.VK_F10)
+    time.sleep(1)
+    win32api.SetCursorPos((105, 85))
+    time.sleep(1)
+    macro.arduino_mouse_click_left()
+    macro.arduino_mouse_click_left()
+    time.sleep(2)
+    macro._DIRECTION_FUNCS[macro.high_count_direction]()
 
-    if _claim_idx_slot(0, SERVER_CLICK_COOLDOWN):
-        print("[server] 서버 HP 0 60초 지속 → 자체 클릭 실행")
-        macro.force_set_foreground_window(macro.lineage1_hwnd)
-        win32api.SetCursorPos((1080, 174))
-        time.sleep(1)
-        macro.arduino_mouse_click_left()
-        time.sleep(2)
-        macro.arduino_key_press(win32con.VK_F10)
-        time.sleep(1)
-        win32api.SetCursorPos((105, 85))
-        time.sleep(1)
-        macro.arduino_mouse_click_left()
-        macro.arduino_mouse_click_left()
-        time.sleep(2)
-        macro._DIRECTION_FUNCS[macro.high_count_direction]()
-        _server_hp_zero_since = time.time()
+
+def _send_restart_click(client: dict) -> bool:
+    """원격 클라이언트에 재접속 클릭 명령을 보내고 ack를 기다린다."""
+    conn = client["conn"]
+    with client["lock"]:
+        req_id = _next_request_id()
+        if not _send_json(conn, {"cmd": "click", "x": 1080, "y": 174, "req_id": req_id}):
+            return False
+        ack = _recv_expected_response(
+            conn,
+            req_id=req_id,
+            expected_status="ok",
+            timeout=ACK_TIMEOUT,
+            client=client,
+        )
+        return bool(ack)
+
+
+def checkRestartStatus(clients_snapshot: list[dict]):
+    """서버/클라이언트 구분 없이 HP가 0인 상태가 60초 지속되면 재접속 클릭을 실행한다.
+
+    - 서버 로컬(conn 없음): 직접 재접속 클릭 시퀀스를 실행한다.
+    - 원격 클라이언트(conn 있음): 해당 클라이언트에 click 명령을 전송한다.
+    HP 0 지속 시작 시각은 각 client dict의 hp_zero_since에 저장한다.
+    """
+    for e in clients_snapshot:
+        if e.get("logout_at") is not None:  # 로그아웃 상태 → 재접속 대기 중
+            continue
+
+        if e["hp"] != 0:
+            e["hp_zero_since"] = None
+            continue
+        if e.get("hp_zero_since") is None:
+            e["hp_zero_since"] = time.time()
+            continue
+        if time.time() - e["hp_zero_since"] < 60:
+            continue
+
+        if "conn" not in e:  # 서버 로컬
+            if _claim_idx_slot(e["idx"], SERVER_CLICK_COOLDOWN):
+                print("[server] 서버 HP 0 60초 지속 → 자체 클릭 실행")
+                _server_self_restart_click()
+                e["hp_zero_since"] = time.time()
+        else:  # 원격 클라이언트
+            if _claim_idx_slot(e["idx"], CLICK_IDX_COOLDOWN):
+                print(f"[server] HP 0 60초 지속 → 클릭 명령 전송: {e['addr']}")
+                if _send_restart_click(e):
+                    print(f"[server] 클릭 ack 수신 from {e['addr']}")
+                    e["hp_zero_since"] = time.time()
 
 
 # ── Exchange 루프 ──────────────────────────────────────────────────────────────
@@ -538,26 +551,25 @@ def exchange_loop():
         clients_snapshot = _update_self_and_snapshot(mp_1, current_hp, max_hp)
 
         # ── 서버 HP가 100%가 아니면 stage를 처음으로 되돌린다 ──────────────
-        if  current_hp != max_hp:
-            print(f"[server] 서버 HP {current_hp}/{max_hp} (100% 아님) → stage 초기화")
-            if macro._exchange_nickname_xy is not None:
-                macro._exchange_nickname_xy = None
-                print(f"[server] 교환 창 닉네임 좌표 초기화")
-            stage = WAIT_NICKNAME
-            greeted_nickname = None
-            adena_before = None
-            prev_brightness = None
-            brightness_changed = False
+        # if  current_hp != max_hp:
+        #     print(f"[server] 서버 HP {current_hp}/{max_hp} (100% 아님) → stage 초기화")
+        #     if macro._exchange_nickname_xy is not None:
+        #         macro._exchange_nickname_xy = None
+        #         print(f"[server] 교환 창 닉네임 좌표 초기화")
+        #     stage = WAIT_NICKNAME
+        #     greeted_nickname = None
+        #     adena_before = None
+        #     prev_brightness = None
+        #     brightness_changed = False
 
-        # ── HP가 0인 상태가 60초 지속되면 자체 재접속 클릭 ────────────────
-        # 서버 로컬은 relogin하지 않고 이 죽음 판정 클릭으로만 복귀한다.
-        checkRestartStatus(current_hp)
+        # ── HP가 0인 상태가 60초 지속되면 재접속 클릭 (서버/클라이언트 공통) ──
+        checkRestartStatus(clients_snapshot)
         
         # heal_and_logout 후 1분 지난 클라이언트(로컬/원격) 재접속
-        _check_relogin(clients_snapshot)
+        # _check_relogin(clients_snapshot)
 
         # heal_and_logout 사용 로직 (max_hp != hp 인 클라이언트)
-        _use_heal_for_clients(clients_snapshot)
+        # _use_heal_for_clients(clients_snapshot)
 
         # 마나포션 사용 로직
         _use_potions_for_clients(clients_snapshot)
@@ -769,7 +781,7 @@ if __name__ == "__main__":
 
     # 서버 자신을 idx=0 으로 _clients에 등록 (conn/addr/lock 없음)
     with _clients_lock:
-        _clients.append({"idx": 0, "mp": 0, "hp": 0, "max_hp": 0, "available": 0, "potion_last_used": 0, "logout_at": None})
+        _clients.append({"idx": 0, "mp": 0, "hp": 0, "max_hp": 0, "available": 0, "potion_last_used": 0, "logout_at": None, "hp_zero_since": None})
 
     print("\n명령어: q=종료, 1=exchange 시작, 2=exchange 중지")
     exchange_thread = None

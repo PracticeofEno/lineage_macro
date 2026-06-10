@@ -567,30 +567,6 @@ def _send_pickup(client: dict, nickname: str | None = None, direction: str | Non
         return "failed"
 
 
-def _send_pickups_parallel(
-    clients: list[dict],
-    nickname: str | None = None,
-    direction: str | None = None,
-) -> dict[int, str]:
-    results: dict[int, str] = {}
-    results_lock = threading.Lock()
-
-    def worker(client: dict) -> None:
-        status = _send_pickup(client, nickname=nickname, direction=direction)
-        with results_lock:
-            results[id(client)] = status
-
-    threads = [
-        threading.Thread(target=worker, args=(client,), daemon=True)
-        for client in clients
-    ]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    return results
-
-
 def _select_chat_client(clients_snapshot: list[dict], preferred_idx: int | None) -> dict | None:
     connected_clients = [c for c in clients_snapshot if "conn" in c]
     if not connected_clients:
@@ -1349,48 +1325,15 @@ def exchange_loop():
                     reverse=True,
                 )
 
-                batch = []
-                batch_indexes = set()
-                wait_seconds = None
-                for c in candidates:
-                    if len(batch) >= remaining:
-                        break
-                    idx = c["idx"]
-                    if idx in batch_indexes:
-                        continue
-                    elapsed = time.time() - last_idx_time.get(idx, 0)
-                    if elapsed < SAME_UNIT_DELAY:
-                        delay = SAME_UNIT_DELAY - elapsed
-                        wait_seconds = delay if wait_seconds is None else min(wait_seconds, delay)
-                        continue
-                    batch.append(c)
-                    batch_indexes.add(idx)
-
-                if not batch:
-                    if wait_seconds is not None:
-                        if _sleep_interruptible(wait_seconds):
-                            break
-                        continue
-                    break
-
                 sent_any = False
-                pickup_results: dict[int, str] = {}
-                parallel_clients = [c for c in batch if "conn" in c]
-                if parallel_clients:
-                    idx_list = ", ".join(str(c["idx"]) for c in parallel_clients)
-                    print(
-                        f"[server] 병렬 픽업 명령 전송 - idx=[{idx_list}], "
-                        f"count={len(parallel_clients)}, remaining={remaining}"
-                    )
-                    pickup_results.update(
-                        _send_pickups_parallel(
-                            parallel_clients,
-                            nickname=greeted_nickname,
-                            direction=shop_direction,
-                        )
-                    )
+                for c in candidates:
+                    if remaining <= 0:
+                        break
+                    elapsed = time.time() - last_idx_time.get(c["idx"], 0)
+                    if elapsed < SAME_UNIT_DELAY:
+                        if _sleep_interruptible(SAME_UNIT_DELAY - elapsed):
+                            break
 
-                for c in batch:
                     pickup_skipped = False
                     if "conn" not in c:
                         print(f"[server] 픽업 실행 - target=server, remaining={remaining}")
@@ -1404,7 +1347,8 @@ def exchange_loop():
                             pickup_skipped = True
                             _last_type_string_time = time.time()
                     else:
-                        pickup_status = pickup_results.get(id(c), "failed")
+                        print(f"[server] 픽업 명령 전송 - target=client, idx={c['idx']}, remaining={remaining}")
+                        pickup_status = _send_pickup(c, nickname=greeted_nickname, direction=shop_direction)
                         if pickup_status == "target_failed":
                             print(f"[server] 픽업 스킵 - reason=target_failed, target=client, idx={c['idx']}")
                             pickup_skipped = True

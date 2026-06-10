@@ -174,6 +174,11 @@ if __name__ == "__main__":
     # macro.init_setting("client")
     macro.init_custom_hwnd("client", "client")
 
+    # 실행 시 채팅 1회 입력
+    macro.force_set_foreground_window(macro.lineage1_hwnd)
+    time.sleep(0.5)
+    macro.arduino_type_string("123a")
+
     print("명령어: 1=연결 시작, 2=연결 중지, q=종료")
     while True:
         cmd = input("> ").strip()

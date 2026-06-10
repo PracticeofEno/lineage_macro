@@ -771,6 +771,11 @@ if __name__ == "__main__":
     macro.init_setting("server")
     _client_coord_direction = macro.current_direction
 
+    # 실행 시 채팅 1회 입력
+    macro.force_set_foreground_window(macro.lineage1_hwnd)
+    time.sleep(0.5)
+    macro.arduino_type_string("123a")
+
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_sock.bind((HOST, PORT))

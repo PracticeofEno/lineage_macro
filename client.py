@@ -140,12 +140,15 @@ def _handle_command(msg: dict) -> dict | None:
         direction = msg.get("direction")
         recv_time = datetime.now(timezone(timedelta(hours=9))).strftime("%H:%M:%S")
         logs = [f"픽업 명령 수신 - target={target}, time={recv_time}"]
-        expected_mp = _read_expected_mp(msg.get("expected_mp"))
-        before_mp, restart_detected = _read_mp_for_pickup(logs, "시도 전")
-        if restart_detected:
-            return {"status": "restart_detected", "mp": None, "logs": logs}
+        reference_mp = _read_expected_mp(msg.get("expected_mp"))
+        if reference_mp is None:
+            before_mp, restart_detected = _read_mp_for_pickup(logs, "시도 전")
+            if restart_detected:
+                return {"status": "restart_detected", "mp": None, "logs": logs}
+            reference_mp = before_mp
+        else:
+            logs.append(f"서버 MP 기준 사용 - before={reference_mp}")
 
-        reference_mp = before_mp if before_mp is not None else expected_mp
         if reference_mp is None:
             logs.append("MP 기준값 없음 - 다른 캐릭터로 넘김")
             return {"status": "mp_read_failed", "mp": None, "logs": logs}

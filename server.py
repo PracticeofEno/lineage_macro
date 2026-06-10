@@ -513,6 +513,8 @@ def _send_pickup(client: dict, nickname: str | None = None, direction: str | Non
             payload["nickname"] = nickname
         if direction:
             payload["direction"] = direction
+        if client.get("mp") is not None:
+            payload["expected_mp"] = client.get("mp")
         if not _send_json(conn, payload):
             _remove_client(client)
             return "failed"
@@ -529,6 +531,14 @@ def _send_pickup(client: dict, nickname: str | None = None, direction: str | Non
         for line in resp.get("logs", []):
             print(f"[client idx({client.get('idx')})] {line}")
 
+        resp_mp = resp.get("mp")
+        if resp_mp is not None:
+            try:
+                client["mp"] = int(resp_mp)
+                client["available"] = int(client["mp"] // 20)
+            except (TypeError, ValueError):
+                pass
+
         if resp.get("status") == "ok":
             print(f"[server] 픽업 응답 수신 - client_idx={client.get('idx')}, status=ok, addr={addr}")
             return "ok"
@@ -536,6 +546,22 @@ def _send_pickup(client: dict, nickname: str | None = None, direction: str | Non
         if resp.get("status") == "target_failed":
             print(f"[server] 픽업 응답 수신 - client_idx={client.get('idx')}, status=target_failed, addr={addr}")
             return "target_failed"
+
+        if resp.get("status") in ("mp_not_spent", "mp_read_failed"):
+            print(
+                f"[server] 픽업 응답 수신 - client_idx={client.get('idx')}, "
+                f"status={resp.get('status')}, addr={addr}"
+            )
+            return str(resp.get("status"))
+
+        if resp.get("status") == "restart_detected":
+            print(f"[server] 픽업 중 Restart 감지 - client_idx={client.get('idx')}, addr={addr}")
+            _request_restart_shutdown(
+                f"client_idx={client.get('idx')}",
+                skip_client=client,
+                click_server=True,
+            )
+            return "failed"
 
         print(f"[server] 픽업 응답 오류 - client_idx={client.get('idx')}, resp={resp}")
         return "failed"
@@ -1329,6 +1355,15 @@ def exchange_loop():
                             print(f"[server] 픽업 스킵 - reason=target_failed, target=client, idx={c['idx']}")
                             pickup_skipped = True
                             _last_type_string_time = time.time()
+                        elif pickup_status in ("mp_not_spent", "mp_read_failed"):
+                            print(
+                                f"[server] 픽업 캐릭터 전환 - reason={pickup_status}, "
+                                f"target=client, idx={c['idx']}"
+                            )
+                            pickup_avail[id(c)] = 0
+                            c["available"] = 0
+                            sent_any = True
+                            continue
                         ok = pickup_status == "ok"
 
                     last_idx_time[c["idx"]] = time.time()

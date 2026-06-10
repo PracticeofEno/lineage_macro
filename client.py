@@ -23,6 +23,8 @@ SERVER_PORT = 9999
 CHAT_FOCUS_SETTLE_SECONDS = 0.25
 CHAT_SEND_SETTLE_SECONDS = 0.8
 RECONNECT_DELAY = 5  # 재연결 대기 시간(초)
+PICKUP_MP_VERIFY_DELAY_SECONDS = 0.8
+PICKUP_MP_RETRY_DELAY_SECONDS = 0.3
 
 if len(sys.argv) < 2:
     print("사용법: python client.py <idx>  (예: python client.py 1)")
@@ -62,6 +64,57 @@ def _recv_json(conn: socket.socket) -> dict | None:
         return None
 
 
+def _read_mp_for_pickup(logs: list[str], label: str) -> tuple[int | None, bool]:
+    try:
+        mp = macro.readMp()
+    except macro.RestartButtonClicked:
+        _handle_restart_watcher_click()
+        logs.append(f"{label} MP 읽기 중 Restart 감지")
+        return None, True
+
+    if mp is None:
+        logs.append(f"{label} MP 읽기 실패")
+    else:
+        logs.append(f"{label} MP={mp}")
+    return mp, False
+
+
+def _read_expected_mp(raw) -> int | None:
+    try:
+        if raw is None:
+            return None
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _run_pickup_once(
+    *,
+    target_nickname: str | None,
+    direction: str | None,
+    logs: list[str],
+    attempt: int,
+) -> tuple[str, int | None]:
+    logs.append(f"헤이스트 시도 {attempt}/2")
+    ok = macro.pickup_lineage1(
+        target_nickname=target_nickname,
+        direction=direction,
+        log_messages=logs,
+        print_logs=False,
+        log_prefix="",
+    )
+    if not ok:
+        return "target_failed", None
+
+    time.sleep(PICKUP_MP_VERIFY_DELAY_SECONDS)
+    after_mp, restart_detected = _read_mp_for_pickup(logs, f"시도 {attempt} 후")
+    if restart_detected:
+        return "restart_detected", None
+    if after_mp is None:
+        return "mp_read_failed", None
+    return "attempted", after_mp
+
+
 def _handle_command(msg: dict) -> dict | None:
     global running, _restart_watcher_stop_reported
     cmd = msg.get("cmd")
@@ -87,16 +140,50 @@ def _handle_command(msg: dict) -> dict | None:
         direction = msg.get("direction")
         recv_time = datetime.now(timezone(timedelta(hours=9))).strftime("%H:%M:%S")
         logs = [f"픽업 명령 수신 - target={target}, time={recv_time}"]
-        ok = macro.pickup_lineage1(
+        expected_mp = _read_expected_mp(msg.get("expected_mp"))
+        before_mp, restart_detected = _read_mp_for_pickup(logs, "시도 전")
+        if restart_detected:
+            return {"status": "restart_detected", "mp": None, "logs": logs}
+
+        reference_mp = before_mp if before_mp is not None else expected_mp
+        if reference_mp is None:
+            logs.append("MP 기준값 없음 - 다른 캐릭터로 넘김")
+            return {"status": "mp_read_failed", "mp": None, "logs": logs}
+
+        status, after_mp = _run_pickup_once(
             target_nickname=nickname,
             direction=direction,
-            log_messages=logs,
-            print_logs=False,
-            log_prefix="",
+            logs=logs,
+            attempt=1,
         )
-        if not ok:
-            return {"status": "target_failed", "logs": logs}
-        return {"status": "ok", "logs": logs}
+        if status != "attempted":
+            return {"status": status, "mp": after_mp, "logs": logs}
+        if after_mp < reference_mp:
+            logs.append(f"MP 소모 확인 - before={reference_mp}, after={after_mp}")
+            return {"status": "ok", "mp": after_mp, "logs": logs}
+
+        logs.append(f"MP 소모 미확인 - before={reference_mp}, after={after_mp}, retry")
+        time.sleep(PICKUP_MP_RETRY_DELAY_SECONDS)
+        retry_reference_mp = after_mp
+        status, retry_after_mp = _run_pickup_once(
+            target_nickname=nickname,
+            direction=direction,
+            logs=logs,
+            attempt=2,
+        )
+        if status == "target_failed":
+            return {"status": "target_failed", "mp": retry_after_mp, "logs": logs}
+        if status == "restart_detected":
+            return {"status": "restart_detected", "mp": retry_after_mp, "logs": logs}
+        if status == "mp_read_failed":
+            logs.append("재시도 후 MP 읽기 실패 - 다른 캐릭터로 넘김")
+            return {"status": "mp_read_failed", "mp": retry_after_mp, "logs": logs}
+        if retry_after_mp is not None and retry_after_mp < retry_reference_mp:
+            logs.append(f"재시도 MP 소모 확인 - before={retry_reference_mp}, after={retry_after_mp}")
+            return {"status": "ok", "mp": retry_after_mp, "logs": logs}
+
+        logs.append(f"재시도 후에도 MP 소모 없음 - before={retry_reference_mp}, after={retry_after_mp}")
+        return {"status": "mp_not_spent", "mp": retry_after_mp, "logs": logs}
 
     if cmd == "potion":
         logs = ["포션 명령 수신"]

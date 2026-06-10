@@ -37,7 +37,8 @@ POTION_COOLDOWN = 600
 MP_RECOVERY_TICK_SECONDS = 16.0
 POTION_UNEATEN_GAIN_MAX = 5
 POTION_EATEN_GAIN_MIN = 8
-POTION_VERIFY_TIMEOUT_SECONDS = MP_RECOVERY_TICK_SECONDS + 6.0
+POTION_UNEATEN_GAIN_CONFIRM_COUNT = 2
+POTION_VERIFY_TIMEOUT_SECONDS = MP_RECOVERY_TICK_SECONDS * 2 + 8.0
 
 # 개별 창의 헤이스트 가능 횟수가 이 값 이하이면 MP 포션 사용 후보로 봅니다.
 # macro_data.json의 direction_threshold와 다릅니다. 이 값은 "포션 사용 기준"입니다.
@@ -246,6 +247,7 @@ def _start_potion_check(client: dict, base_mp: int, sent_at: float) -> None:
         "sent_at": sent_at,
         "base_mp": base_mp,
         "last_mp": base_mp,
+        "low_gain_count": 0,
     }
     client["potion_retry_required"] = False
     print(
@@ -275,11 +277,22 @@ def _update_potion_check(client: dict, mp: int) -> None:
         return
 
     if 0 < delta <= POTION_UNEATEN_GAIN_MAX:
+        low_gain_count = int(check.get("low_gain_count", 0)) + 1
+        check["low_gain_count"] = low_gain_count
+        if low_gain_count < POTION_UNEATEN_GAIN_CONFIRM_COUNT:
+            print(
+                f"[server] 포션 확인 보류 - target={_potion_target_label(client)}, "
+                f"mp_delta={delta}, mp={mp}, "
+                f"low_gain={low_gain_count}/{POTION_UNEATEN_GAIN_CONFIRM_COUNT}"
+            )
+            return
+
         client["potion_check"] = None
         client["potion_retry_required"] = True
         print(
             f"[server] 포션 미사용 감지 - target={_potion_target_label(client)}, "
-            f"mp_delta={delta}, mp={mp}, retry"
+            f"mp_delta={delta}, mp={mp}, "
+            f"low_gain={low_gain_count}/{POTION_UNEATEN_GAIN_CONFIRM_COUNT}, retry"
         )
         return
 

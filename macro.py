@@ -363,6 +363,33 @@ _RESTART_CLICK_SCREEN_Y_OFFSET = 25
 _RESTART_TEXT_BRIGHT_THRESHOLD = 250
 _RESTART_CONFIRM_BRIGHT_THRESHOLD = 120
 _RESTART_CLICK_MIN_INTERVAL_SECONDS = 1.0
+
+_BAR_CONFIGS: dict[str, dict] = {
+    "HP": {"y0": 667, "h": 15, "center": (255, 213, 213), "tol": 5, "anchor": 527, "step": -10, "bound": 430},
+    "MP": {"y0": 667, "h": 14, "center": (200, 206, 255), "tol": 5, "anchor": 717, "step": 10, "bound": 840},
+}
+_BAR_TEMPLATES: dict[str, dict[str, str]] = {}
+
+
+def _load_bar_templates() -> None:
+    path = os.path.join(_BASE, "bar_templates.json")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    for stat, cfg in data.items():
+        if stat not in _BAR_CONFIGS:
+            continue
+        if "center" in cfg:
+            _BAR_CONFIGS[stat]["center"] = tuple(cfg["center"])
+        if "tol" in cfg:
+            _BAR_CONFIGS[stat]["tol"] = cfg["tol"]
+        if "y0" in cfg:
+            _BAR_CONFIGS[stat]["y0"] = cfg["y0"]
+        if "h" in cfg:
+            _BAR_CONFIGS[stat]["h"] = cfg["h"]
+        _BAR_TEMPLATES[stat] = dict(cfg.get("digits", {}))
+
+
+_load_bar_templates()
 _RESTART_WATCH_INTERVAL_SECONDS = 0.5
 _restart_click_lock = _threading.Lock()
 _restart_watch_lock = _threading.Lock()
@@ -1162,19 +1189,69 @@ def stop_restart_watcher() -> None:
             _restart_watch_stop.set()
 
 
-def readMp(img=None) -> int | None:
+def _bar_cell_coordstr(arr: np.ndarray, cx: int, cfg: dict) -> str:
+    sub = arr[cfg["y0"]:cfg["y0"] + cfg["h"], cx:cx + 10].astype(int)
+    cr, cg, cb = cfg["center"]
+    tol = cfg["tol"]
+    mask = (
+        (np.abs(sub[:, :, 0] - cr) <= tol)
+        & (np.abs(sub[:, :, 1] - cg) <= tol)
+        & (np.abs(sub[:, :, 2] - cb) <= tol)
+    )
+    ys, xs = np.where(mask)
+    return "".join(f"{x}{y}" for x, y in sorted(zip(xs.tolist(), ys.tolist())))
+
+
+def _bar_digit_groups(arr: np.ndarray, stat: str) -> list[str]:
+    cfg = _BAR_CONFIGS[stat]
+    digits = _BAR_TEMPLATES[stat]
+    anchor, step, bound = cfg["anchor"], cfg["step"], cfg["bound"]
+
+    groups: list[list[str]] = []
+    current: list[str] = []
+    cx = anchor
+    while (cx <= bound) if step > 0 else (cx >= bound):
+        d = digits.get(_bar_cell_coordstr(arr, cx, cfg))
+        if d is not None:
+            current.append(d)
+        elif current:
+            groups.append(current)
+            current = []
+            if len(groups) >= 2:
+                break
+        cx += step
+    if current and len(groups) < 2:
+        groups.append(current)
+
+    if step < 0:
+        groups = [g[::-1] for g in groups]
+    return ["".join(g) for g in groups]
+
+
+def read_bar_stat(image: Image.Image, stat: str) -> tuple[int | None, int | None]:
+    arr = np.array(image.convert("RGB"))
+    groups = _bar_digit_groups(arr, stat)
+    if len(groups) < 2:
+        return None, None
+    if _BAR_CONFIGS[stat]["step"] > 0:
+        current, maximum = int(groups[0]), int(groups[1])
+    else:
+        maximum, current = int(groups[0]), int(groups[1])
+    return current, maximum
+
+
+def read_mp(img=None) -> int:
+    global mp_1
     if img is None:
         img = screenshot()
-    if click_restart_if_visible(img):
-        raise RestartButtonClicked("Restart button clicked")
-    for dx in (0, 5, 10):
-        cropped = crop(img, 976 + dx, 96, 100, 21)
-        text = read_text(cropped, 0, 0, (0xCC, 0xE3, 0xFF))
-        parts = text.split('/')
-        digits = ''.join(c for c in parts[0] if c.isdigit())
-        if digits:
-            return int(digits)
-    return None
+    current, _ = read_bar_stat(img, "MP")
+    if current is not None:
+        mp_1 = current
+    return mp_1
+
+
+def readMp(img=None) -> int:
+    return read_mp(img)
 
 
 def readAdena(max_attempts: int | None = None, key_delay: float = 0.2) -> int | None:
